@@ -1,0 +1,43 @@
+%YAML:1.0
+# Lab 3 - 3.1 face recognition settings. Edit and rerun; no recompile needed.
+
+# --- camera & screen ---
+camera_index: 2              # /dev/video2, same as Lab 2
+camera_width: 640
+camera_height: 480
+fb_device: "/dev/fb2"        # fb2 = HDMI 1920x1080 @ 32 bpp; fb0 = 7" LCD
+display_fit: 0               # 0 = show the camera image at its own size, centered (fast)
+                             # 1 = scale it up to fill the screen (about 5x more data per frame on HDMI)
+
+# --- Haar face detection ---
+face_cascade: "models/haarcascade_frontalface_default.xml"
+eye_cascade: "models/haarcascade_eye.xml"
+detect_width: 320            # downscale width before detection; lower = faster, misses small faces
+scale_factor: 1.15           # image pyramid step; larger = faster, less accurate
+min_neighbors: 4             # higher = fewer false boxes, more missed faces
+min_face: 30                 # minimum face width in the downscaled image (pixels)
+overlap_merge: 0.6           # two boxes overlapping more than this share of the smaller one = same face
+
+# --- MobileFaceNet (ncnn) ---
+model_param: "models/mobilefacenet.param"
+model_bin: "models/mobilefacenet.bin"
+input_blob: "data"
+output_blob: "fc1"
+input_rgb: 1                 # 1 = feed RGB (InsightFace convention), 0 = feed BGR
+ncnn_threads: 2              # the other cores are used by camera + detection
+
+# --- identity decision ---
+gallery: "gallery.yml"
+sim_threshold: 0.45          # cosine similarity below this -> unknown (calibrate with enroll/score)
+sim_margin: 0.08             # best - second below this -> unknown
+
+# --- tracking & stability ---
+recog_interval: 1.0          # seconds between re-recognitions of the same face
+vote_window: 7               # number of recent results kept per face
+vote_min: 3                  # votes needed before the shown label changes
+iou_match: 0.3               # box overlap that counts as the same face...
+center_match: 1.0            # ...or centers closer than this many face widths (catches fast movement)
+ema_alpha: 0.4               # box smoothing for small changes: lower = steadier, slower to follow
+snap_distance: 0.25          # moved more than this many face widths -> jump to the new spot, no smoothing
+min_hits: 2                  # detections needed before a face is drawn
+track_timeout: 0.4           # seconds a face can go undetected before its box is removed

@@ -1,0 +1,82 @@
+--- a/src/config.cpp	2026-11-01 00:36:03.000000000 +0800
++++ b/src/config.cpp	2026-11-12 20:42:18.572102617 +0800
+@@ -30,6 +30,7 @@
+     read_field ( fs, "nms_iou", nms_iou );
+     read_field ( fs, "contain", contain );
+     read_field ( fs, "tile_grid", tile_grid );
++    read_field ( fs, "tile_grids", tile_grids );
+     read_field ( fs, "tile_overlap", tile_overlap );
+     read_field ( fs, "tile_max_box", tile_max_box );
+ 
+--- a/src/config.hpp	2026-11-01 13:13:05.000000000 +0800
++++ b/src/config.hpp	2026-11-12 20:42:18.572102617 +0800
+@@ -18,6 +18,7 @@
+     double nms_iou = 0.45;          // 同一頂帽子的重複框，IoU 超過此值只留最高分
+     double contain = 0.70;          // 小框有 70% 以上落在另一個框內，視為同一人重複框
+     int tile_grid = 2;              // 額外切 n x n 塊各跑一次（0 = 只跑整張圖）
++    std::string tile_grids = "";    // 一次切好幾種，例如 "2 4"（有寫就蓋過 tile_grid）
+     double tile_overlap = 0.2;      // 切塊之間的重疊比例
+     double tile_max_box = 32;       // 切塊只保留在整張圖（模型尺度）小於這個像素的框
+ 
+--- a/src/helmet_detector.cpp	2026-11-01 00:36:01.000000000 +0800
++++ b/src/helmet_detector.cpp	2026-11-12 20:42:18.572102617 +0800
+@@ -4,6 +4,7 @@
+ #include <algorithm>
+ #include <cmath>
+ #include <iostream>
++#include <sstream>
+ 
+ bool HelmetDetector::load ( const Config &config )
+ {
+@@ -77,12 +78,15 @@
+     std::vector<Box> boxes = detect ( bgr );        // 整張圖一次（近的、大的人）
+ 
+     // 大圖再切塊各跑一次（遠處的小帽子整張縮到 640 會看不到）。
+-    // 切塊比模型輸入還小就不切：放大小圖會把臉等誤判成帽子
+-    const int n = cfg.tile_grid;
+-    if ( n >= 2 && std::min ( w, h ) >= n * cfg.input_size )
+-    {
+-        // 整張圖縮到模型輸入的比例：切塊只補整張圖裡太小（< tile_max_box px）的帽子，大的整張圖已經抓得到
+-        const double r = std::min ( (double) cfg.input_size / w, (double) cfg.input_size / h );
++    // 可以切好幾種大小（例如 "2 4"）：粗的切塊補中等大小的帽子，細的切塊補很遠的小帽子
++    std::vector<int> grids = tile_grids ( cfg );
++    // 整張圖縮到模型輸入的比例：切塊只補整張圖裡太小（< tile_max_box px）的帽子，大的整張圖已經抓得到
++    const double r = std::min ( (double) cfg.input_size / w, (double) cfg.input_size / h );
++    for ( size_t gi = 0; gi < grids.size ( ); gi++ )
++    {
++        const int n = grids[gi];
++        // 切塊比模型輸入還小就不切：放大小圖會把臉等誤判成帽子
++        if ( n < 2 || std::min ( w, h ) < n * cfg.input_size ) continue;
+         std::vector<cv::Rect> tiles = make_tiles ( w, h, n, cfg.tile_overlap );
+         for ( size_t t = 0; t < tiles.size ( ); t++ )
+         {
+@@ -115,6 +119,17 @@
+     return final_boxes;
+ }
+ 
++// 讀 config 的 tile_grids（例如 "2 4"）；沒寫就用 tile_grid 一個值
++std::vector<int> tile_grids ( const Config &cfg )
++{
++    std::vector<int> grids;
++    std::istringstream ss ( cfg.tile_grids );
++    int n;
++    while ( ss >> n ) grids.push_back ( n );
++    if ( grids.empty ( ) ) grids.push_back ( cfg.tile_grid );
++    return grids;
++}
++
+ std::vector<cv::Rect> make_tiles ( int w, int h, int n, double overlap )
+ {
+     // n 塊、相鄰重疊 overlap：n*tw - (n-1)*overlap*tw = w
+--- a/src/helmet_detector.hpp	2026-11-01 00:25:25.000000000 +0800
++++ b/src/helmet_detector.hpp	2026-11-12 20:42:18.572102617 +0800
+@@ -33,6 +33,9 @@
+     int pass_count = 0;
+ };
+ 
++// 要切哪幾種 n x n（config 的 tile_grids，例如 "2 4"）
++std::vector<int> tile_grids ( const Config &cfg );
++
+ // 把 w x h 的圖切成 n x n 塊（互相重疊 overlap）
+ std::vector<cv::Rect> make_tiles ( int w, int h, int n, double overlap );
+ 

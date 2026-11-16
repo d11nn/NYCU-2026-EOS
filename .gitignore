@@ -2,3 +2,15 @@
 build/
 third_party/
 models/
+
+# vendor toolchain and board images: 2.6 GB, several files over GitHub's 100 MB limit
+/board_package/
+# third-party sources that can be downloaded again
+/lab2/115_LAB2_package.zip
+/lab2/115_LAB2_package/LAB2_package/lab2_1_package/opencv-3.4.7/
+/lab2/115_LAB2_package/LAB2_package/lab2_1_package/opencv-3.4.7.zip
+/tools/lrzsz-0.12.20/
+/tools/benchmark/
+# model weights and deploy bundles that contain them (same rule as models/)
+*.ncnn.bin
+/lab3/face/*.tar.gz

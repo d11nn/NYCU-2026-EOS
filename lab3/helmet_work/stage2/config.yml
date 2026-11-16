@@ -1,0 +1,23 @@
+%YAML:1.0
+# Lab 3 - 3.2 helmet detection settings. Edit and rerun; no recompile needed.
+
+# --- YOLO26s (ncnn) ---
+model_param: "models/helmet.ncnn.param"
+model_bin: "models/helmet.ncnn.bin"
+input_blob: "in0"
+output_blob: "out0"
+input_size: 640              # fixed when the model was exported
+ncnn_threads: 4
+
+# --- detection & merging ---
+conf_threshold: 0.55         # best F1 on our own validation sets (never the hidden photo)
+nms_iou: 0.45                # boxes overlapping more than this: keep the highest score
+contain: 0.70                # a box mostly inside another box is the same person: drop it
+tile_grid: 2                 # also run on n x n overlapping tiles of large photos (0 = whole image only)
+tile_overlap: 0.2
+tile_max_box: 32             # tiles only add boxes smaller than this (px at whole-image model scale): far-away people
+
+# --- output ---
+fb_device: "/dev/fb2"        # HDMI 1920x1080 (fb0 is the 800x480 LCD)
+jpeg_quality: 95
+wait_enter: 1                # keep the program (and screen) until Enter is pressed

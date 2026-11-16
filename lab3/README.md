@@ -9,6 +9,9 @@
 
 ```
 lab3/
+├── 115_lab3.pdf                講義（3.1 即時人臉辨識、3.2 安全帽、3.3 報告）
+├── 115_lab3_final_demo.pdf     final demo 規則（輸出 lab3_final_<組別>.jpg，F1 評分）
+├── mock.jpg            final demo 前公布的練習圖（6000x4000 拼貼）
 ├── lab3-report.md      3.1 人臉辨識的流程報告
 ├── assets/             報告用的圖
 ├── face/               3.1 即時人臉辨識（執行檔 face3）
@@ -19,7 +22,15 @@ lab3/
     ├── src/            main.cpp、helmet_detector.*、framebuffer.*、config.*
     ├── CODE_GUIDE.md   安全帽部分的逐行導讀
     └── config.yml、Makefile、run.sh
+
+helmet_work/            安全帽開發過程的工作檔
+├── stage ~ stage7/     每次改版放到板子的部署包（執行檔、config、MD5SUMS、預期輸出 expected.txt、測試圖）
+├── tools/              用序列埠 zmodem 傳檔的腳本（sz_to_board.sh、rz_from_board.sh、sercmd.py）和傳檔紀錄
+├── fromboard/          從板子抓回來的結果圖
+└── multi-scale-tiles.patch   同時用多種切塊大小（例如 2x2 加 4x4）的修改，尚未在板子上測試
 ```
+
+`face/face3`、`face/libgomp.so.1` 是編好的 ARM 執行檔和板子上需要的 OpenMP 執行期函式庫。
 
 模型檔（`models/`）、ncnn（`third_party/`）和編譯產物（`build/`）不在 repo 裡，分別由 `face/scripts/get_models.sh`、
 `face/scripts/build_ncnn.sh` 和 `make` 產生；安全帽模型 `helmet.ncnn.param/.bin` 由訓練機匯出後放到 `helmet/models/`。

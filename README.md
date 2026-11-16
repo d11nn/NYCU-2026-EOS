@@ -7,6 +7,19 @@
 | [`lab1/`](lab1/) | 交叉編譯 hello world |
 | [`lab2/`](lab2/) | 直接寫 framebuffer：顯示圖片、攝影機即時畫面、跑馬燈 |
 | [`lab3/`](lab3/) | 3.1 即時人臉辨識（`face/`）、3.2 安全帽偵測（`helmet/`） |
+| `tools/` | 序列埠傳檔工具 lrzsz 的原始碼壓縮檔 |
+
+各 lab 資料夾裡有講義 PDF、原始碼、編好的 ARM 執行檔和 README。
+
+### 沒有放進 repo 的東西
+
+| 項目 | 原因 | 怎麼取得 |
+|---|---|---|
+| `board_package/`（板子映像檔、U-Boot、交叉編譯器安裝包） | 2.6 GB，其中多個檔案超過 GitHub 單檔 100 MB 上限 | 課程 Lab 1 提供的套件 |
+| OpenCV 3.4.7 原始碼（`lab2/115_LAB2_package/.../opencv-3.4.7*`、`lab2/115_LAB2_package.zip`） | 第三方原始碼，約 360 MB | 課程 Lab 2 套件，或 OpenCV 官方 3.4.7 版 |
+| ncnn（`lab3/face/third_party/`） | 第三方原始碼 | `lab3/face/scripts/build_ncnn.sh` |
+| 模型權重（`models/`、`*.ncnn.bin`） | 檔案大，人臉模型沒有授權條款 | `lab3/face/scripts/get_models.sh`；安全帽模型由訓練機匯出 |
+| CoreMark、解壓後的 lrzsz | 第三方原始碼 | github.com/eembc/coremark；`tools/lrzsz-0.12.20.tar.gz` |
 
 ## 開發環境
 

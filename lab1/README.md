@@ -5,6 +5,8 @@
 | 檔案 | 說明 |
 |---|---|
 | `hello_word.c` | 印出兩位組員學號組成的字串 |
+| `hello_word` | 編好的 ARM 執行檔 |
+| `Eos_lab1_backup.zip` | 當時 lab1 和序列埠工具（lrzsz、CoreMark）的備份 |
 
 ## 編譯
 

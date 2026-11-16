@@ -1,7 +1,7 @@
 # Lab 2：Framebuffer 影像輸出（圖片 / 攝影機 / 跑馬燈）
 
 目標：不靠 X / Qt，直接把像素寫進 Linux framebuffer 裝置（`/dev/fb0`）來顯示畫面。
-三個 part 的程式都在 `src/`。
+三個 part 的程式都在 `src/`，編好的 ARM 執行檔在 `bin/`。
 
 ## 檔案
 
@@ -10,6 +10,10 @@
 | `src/lab_2-1_source.cpp` | Part 1：顯示一張 BMP |
 | `src/lab_2-2_source.cpp` | Part 2：攝影機即時顯示 + 按 `c` 截圖、`q` 離開 |
 | `src/lab_2-3_source.cpp` | Part 3：高解析度攝影機（mmap 寫 fb）+ `scroll` 跑馬燈模式 |
+| `bin/demo` `bin/lab22` `bin/lab23` | 對應 Part 1 / 2 / 3 的 ARM 執行檔 |
+| `30_lab2_source.zip` | 繳交用的原始碼壓縮檔（內容同 `src/`） |
+| `115_lab2.pdf` | 講義（OpenCV 交叉編譯步驟在 4.x 節） |
+| `115_LAB2_package/LAB2_package/` | 課程套件：`lab2_1_package/`（`NYCU_logo.bmp`、同一份 .cpp 與執行檔）、`lab2_3/`（跑馬燈圖 `advance.png`、TQIMX6 U-Boot 選單手冊）。套件裡的 OpenCV 原始碼沒有放進 repo |
 
 ## 編譯（開發機）
 

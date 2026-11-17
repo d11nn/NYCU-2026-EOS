@@ -1,0 +1,1294 @@
+<title>E9V3 人臉辨識流程</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a bench-test sheet — one large "scope" (the animated frame) beside its probe notes, thread lanes underneath, then the decision bench and the code map. */
+:root {
+  --bg: #eef1f4;
+  --surface: #ffffff;
+  --ink: #16202b;
+  --muted: #5b6776;
+  --line: #d3d9e0;
+  --accent: #b9661a;          /* copper trace */
+  --accent-soft: #f6e6d6;
+  --member: #1d8f4e;
+  --unknown: #cf3f37;
+  --pending: #b88a00;
+  --scene-wall: #c9d2dc;
+  --scene-floor: #9aa6b3;
+  --scene-desk: #b48a63;
+  --scene-monitor: #2b333d;
+  --skin: #e8c3a2;
+  --hair: #2a2522;
+  --shirt-a: #3f5d7a;
+  --shirt-b: #6b4c6e;
+  --shirt-c: #4e6b4a;
+  --scene-text: #ffffff;
+  --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10151b; --surface: #18202a; --ink: #e5eaf0; --muted: #96a2af; --line: #2b3642;
+    --accent: #e48d3e; --accent-soft: #3a2a1b; --member: #3cc27a; --unknown: #f06a60; --pending: #e0b437;
+    --scene-wall: #4a5562; --scene-floor: #36404b; --scene-desk: #6e5640; --scene-monitor: #11161c;
+    --skin: #d6ad8a; --hair: #15110f; --shirt-a: #34506b; --shirt-b: #5b405e; --shirt-c: #3f5a3c; --scene-text: #ffffff;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10151b; --surface: #18202a; --ink: #e5eaf0; --muted: #96a2af; --line: #2b3642;
+  --accent: #e48d3e; --accent-soft: #3a2a1b; --member: #3cc27a; --unknown: #f06a60; --pending: #e0b437;
+  --scene-wall: #4a5562; --scene-floor: #36404b; --scene-desk: #6e5640; --scene-monitor: #11161c;
+  --skin: #d6ad8a; --hair: #15110f; --shirt-a: #34506b; --shirt-b: #5b405e; --shirt-c: #3f5a3c; --scene-text: #ffffff;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body);
+  font-size: 15px; line-height: 1.7;
+}
+.wrap {
+  max-width: 1180px; margin: 0 auto;
+  padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 40px;
+}
+h1, h2, h3 { text-wrap: balance; margin: 0; line-height: 1.3; }
+h1 { font-size: clamp(1.6rem, 3.4vw, 2.3rem); font-weight: 900; letter-spacing: 0.01em; }
+h2 { font-size: 1.35rem; font-weight: 700; }
+h3 { font-size: 1.05rem; font-weight: 700; }
+p { margin: 0; max-width: 68ch; }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.muted { color: var(--muted); }
+
+header.intro { display: grid; gap: 12px; }
+.flowline {
+  display: flex; flex-wrap: wrap; gap: 6px 4px; align-items: center;
+  font-family: var(--font-mono); font-size: 12.5px; color: var(--muted);
+}
+.flowline span.node { color: var(--ink); background: var(--surface); border: 1px solid var(--line); padding: 2px 8px; border-radius: 4px; }
+.flowline span.arrow { color: var(--accent); }
+
+/* stepper */
+.steps { display: flex; flex-wrap: wrap; gap: 8px; }
+.steps button {
+  font: inherit; font-size: 13.5px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  padding: 6px 12px; border-radius: 6px; display: inline-flex; gap: 8px; align-items: center;
+}
+.steps button .n { font-family: var(--font-mono); font-weight: 600; color: var(--accent); }
+.steps button[aria-current="step"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.steps button[aria-current="step"] .n { color: #fff; }
+.steps button:focus-visible, .controls button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.stage { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 880px) { .stage { grid-template-columns: minmax(0, 1fr); } }
+.scope {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  display: grid;
+}
+.scope-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 14px; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+}
+.scope svg.scene { display: block; width: 100%; height: auto; }
+.lanes { border-top: 1px solid var(--line); }
+.lanes svg { display: block; width: 100%; height: auto; }
+
+.controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.controls button {
+  font: inherit; font-size: 13px; cursor: pointer; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); padding: 4px 12px; border-radius: 6px;
+}
+.controls button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+.notes { display: grid; gap: 16px; min-width: 0; }
+.notes .lead { font-size: 1.02rem; }
+.notes ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+.block { display: grid; gap: 8px; }
+.block > .label { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.codelist { display: grid; gap: 6px; }
+.codeitem {
+  display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 2px 12px;
+  padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 0 6px 6px 0;
+}
+.codeitem .where { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); grid-column: 1 / -1; overflow-wrap: anywhere; }
+.codeitem .where b { color: var(--accent); font-weight: 600; }
+.codeitem .what { grid-column: 1 / -1; color: var(--muted); font-size: 13.5px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  font-family: var(--font-mono); font-size: 12px; padding: 3px 8px; border-radius: 4px;
+  background: var(--accent-soft); color: var(--ink); border: 1px solid transparent;
+}
+.chip i { font-style: normal; color: var(--muted); }
+
+/* scene animation */
+.fade { animation: fade .5s ease both; }
+.d1 { animation-delay: .35s; } .d2 { animation-delay: .9s; } .d3 { animation-delay: 1.5s; } .d4 { animation-delay: 2.1s; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+.scan { animation: scan 2.4s linear infinite; }
+@keyframes scan {
+  0% { transform: translate(0px, 0px); } 24% { transform: translate(540px, 0px); }
+  25% { transform: translate(0px, 130px); } 49% { transform: translate(540px, 130px); }
+  50% { transform: translate(0px, 260px); } 74% { transform: translate(540px, 260px); }
+  75% { transform: translate(0px, 360px); } 100% { transform: translate(540px, 360px); }
+}
+.fly { animation: fly 1.2s ease both; }
+@keyframes fly { from { transform: translate(-40px, 0); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .fade, .fly { animation: none; }
+  .scan { animation: none; }
+}
+
+/* code walkthrough */
+.codeview { display: grid; gap: 18px; }
+.snip { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: grid; min-width: 0; }
+.snip-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 8px 14px; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: 12.5px; }
+.snip-head b { color: var(--accent); font-weight: 600; }
+.snip-body { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); min-width: 0; }
+@media (max-width: 880px) { .snip-body { grid-template-columns: minmax(0, 1fr); } }
+.src { overflow-x: auto; background: var(--bg); border-right: 1px solid var(--line); }
+.src pre { margin: 0; padding: 10px 0; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; tab-size: 4; }
+.src .ln { display: block; padding: 0 14px 0 0; white-space: pre; }
+.src .ln .no { display: inline-block; width: 4.2em; padding-right: 0.9em; text-align: right; color: var(--muted); user-select: none; }
+.src .ln.hl { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.src .ln .mk { display: inline-block; min-width: 1.6em; margin-left: 0.8em; padding: 0 5px; border-radius: 3px; background: var(--accent); color: #fff; font-size: 11px; text-align: center; }
+.explain { padding: 12px 14px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.explain ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.explain li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; font-size: 14px; align-items: baseline; }
+.explain li .mk { font-family: var(--font-mono); font-size: 11px; padding: 0 6px; border-radius: 3px; background: var(--accent); color: #fff; }
+.explain li .lno { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+@media (max-width: 880px) { .src { border-right: 0; border-bottom: 1px solid var(--line); } }
+
+/* decision bench */
+section { display: grid; gap: 16px; }
+.bench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 20px; align-items: start; }
+@media (max-width: 880px) { .bench { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 14px; min-width: 0; }
+.slider { display: grid; gap: 4px; }
+.slider label { display: flex; justify-content: space-between; font-size: 14px; }
+.slider output { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 600; }
+.slider input { width: 100%; accent-color: var(--accent); }
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; letter-spacing: 0.06em; color: var(--muted); font-weight: 500; }
+td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.pill { display: inline-block; font-family: var(--font-mono); font-size: 12px; padding: 2px 8px; border-radius: 999px; color: #fff; white-space: nowrap; }
+.pill.member { background: var(--member); }
+.pill.unknown { background: var(--unknown); }
+.reason { font-size: 12.5px; color: var(--muted); }
+.origin { font-size: 12px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--line); white-space: nowrap; }
+.origin.ours { border-color: var(--accent); color: var(--accent); }
+.origin.lab2 { border-color: var(--member); color: var(--member); }
+.origin.ext { color: var(--muted); }
+footer { font-size: 13px; color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <header class="intro">
+    <div class="eyebrow">Lab 3 · 3.1 · Embedsky E9V3</div>
+    <h1>人臉辨識流程：從攝影機到螢幕上的學號</h1>
+    <p class="muted">每一幀畫面從 <code>camera.cpp</code> 進來，經過 Haar 找臉、追蹤、MobileFaceNet 辨識、投票，最後畫上框和學號輸出到 HDMI。點下面的步驟，或按「播放」看整個流程；左邊是畫面上發生的事，右邊是對應的程式碼。</p>
+    <div class="flowline" aria-label="流程摘要">
+      <span class="node">camera</span><span class="arrow">→</span>
+      <span class="node">Haar 偵測</span><span class="arrow">→</span>
+      <span class="node">追蹤</span><span class="arrow">→</span>
+      <span class="node">送辨識</span><span class="arrow">→</span>
+      <span class="node">對齊＋MobileFaceNet＋比對</span><span class="arrow">→</span>
+      <span class="node">投票</span><span class="arrow">→</span>
+      <span class="node">畫框＋輸出</span>
+    </div>
+  </header>
+
+  <section aria-label="逐步動畫">
+    <nav class="steps" id="steps" aria-label="步驟"></nav>
+    <div class="stage">
+      <div class="scope">
+        <div class="scope-head">
+          <span id="scopeTitle">frame</span>
+          <div class="controls">
+            <button id="prev" type="button">上一步</button>
+            <button id="play" type="button" class="primary">播放</button>
+            <button id="next" type="button">下一步</button>
+          </div>
+        </div>
+        <svg class="scene" id="scene" viewBox="0 0 640 480" role="img" aria-label="目前步驟的畫面示意"></svg>
+        <div class="lanes">
+          <svg id="lanes" viewBox="0 0 640 172" role="img" aria-label="三個執行緒與目前步驟的位置"></svg>
+        </div>
+      </div>
+      <div class="notes" id="notes" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="codeTitle">
+    <div class="eyebrow" id="codeEyebrow">實際程式碼</div>
+    <h2 id="codeTitle">這一步的實際程式碼</h2>
+    <p class="muted">下面是 <code>lab3/face/src/</code> 裡的原始碼，行號跟檔案一致。橘色底的行是重點，右邊依編號解釋。切換上面的步驟，這裡會跟著換。</p>
+    <div class="codeview" id="codeview"></div>
+  </section>
+
+  <section aria-labelledby="benchTitle">
+    <div class="eyebrow">Gallery::match</div>
+    <h2 id="benchTitle">學號還是 unknown：門檻怎麼決定</h2>
+    <p>MobileFaceNet 把每張臉變成 128 個數字。程式把它跟兩位組員的「範本」（登錄照片的平均）算 cosine 相似度：越接近 1 越像。<b>最高分夠高、而且明顯贏過第二名</b>，才顯示學號；否則一律是 unknown。拉動門檻看看判斷怎麼變。</p>
+    <div class="bench">
+      <div class="panel">
+        <div class="slider">
+          <label for="thr"><span>sim_threshold（最低相似度）</span><output id="thrOut">0.45</output></label>
+          <input id="thr" type="range" min="0.10" max="0.95" step="0.01" value="0.45">
+        </div>
+        <div class="slider">
+          <label for="mar"><span>sim_margin（贏第二名多少）</span><output id="marOut">0.08</output></label>
+          <input id="mar" type="range" min="0.00" max="0.40" step="0.01" value="0.08">
+        </div>
+        <p class="reason">實測（登錄照片）：314831017 跟自己範本平均 0.909、最低 0.766；314581047 平均 0.863。兩位組員彼此最高只有 0.089。所以 0.45 落在中間，兩邊都留了很大的空間。</p>
+        <div class="controls"><button id="resetThr" type="button">回到預設 0.45 / 0.08</button></div>
+      </div>
+      <div class="panel">
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>畫面中的臉（示意數字）</th><th>跟 314831017</th><th>跟 314581047</th><th>判斷</th></tr></thead>
+            <tbody id="benchRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="mapTitle">
+    <div class="eyebrow">Code map</div>
+    <h2 id="mapTitle">每個檔案做什麼、從哪裡來</h2>
+    <div class="tablewrap panel">
+      <table>
+        <thead><tr><th>檔案</th><th>在流程中的角色</th><th>主要函式</th><th>來源</th></tr></thead>
+        <tbody>
+          <tr><td><code>camera.cpp</code></td><td>① 攝影機執行緒，只保留最新畫面</td><td><code>Camera::loop</code>、<code>wait_frame</code></td><td><span class="origin ours">Lab 3 新寫</span></td></tr>
+          <tr><td><code>face_detector.cpp</code></td><td>② 呼叫 Haar 前後的處理、合併重疊框</td><td><code>FaceDetector::detect</code>、<code>merge_overlaps</code></td><td><span class="origin ours">Lab 3 新寫</span></td></tr>
+          <tr><td><code>tracker.cpp</code></td><td>③ 追蹤、平滑、保留時間；⑥ 投票、同學號去重複</td><td><code>Tracker::update</code>、<code>add_vote</code>、<code>resolve_duplicates</code></td><td><span class="origin ours">Lab 3 新寫</span></td></tr>
+          <tr><td><code>main.cpp</code></td><td>主迴圈串起所有步驟、畫框、耗時紀錄；登錄與測試模式</td><td><code>run_live</code>、<code>draw_tracks</code>、<code>run_enroll</code>、<code>run_score</code></td><td><span class="origin ours">Lab 3 新寫</span></td></tr>
+          <tr><td><code>recognizer.cpp</code></td><td>④ 工作佇列、⑤ 背景辨識執行緒</td><td><code>Recognizer::push</code>、<code>loop</code>、<code>take_results</code></td><td><span class="origin lab2">改自 Lab 2‑3 ScreenshotWriter</span></td></tr>
+          <tr><td><code>face_aligner.cpp</code></td><td>⑤ 找眼睛、轉正、裁成 112×112</td><td><code>FaceAligner::find_eyes</code>、<code>align</code></td><td><span class="origin ours">Lab 3 新寫</span></td></tr>
+          <tr><td><code>face_embedder.cpp</code></td><td>⑤ 用 ncnn 跑 MobileFaceNet、相似度</td><td><code>FaceEmbedder::embed</code>、<code>cosine_similarity</code></td><td><span class="origin ours">Lab 3 新寫</span></td></tr>
+          <tr><td><code>gallery.cpp</code></td><td>⑤ 組員範本、判斷學號或 unknown</td><td><code>Gallery::match</code>、<code>finalize</code></td><td><span class="origin ours">Lab 3 新寫</span></td></tr>
+          <tr><td><code>framebuffer.cpp</code></td><td>⑦ 寫入螢幕、16/32 bpp、等比例縮放</td><td><code>Framebuffer::show</code>、<code>convert</code></td><td><span class="origin lab2">改自 Lab 2‑3</span></td></tr>
+          <tr><td><code>keyboard.cpp</code></td><td>按 q 結束、s 存圖</td><td><code>read_key</code></td><td><span class="origin lab2">沿用 Lab 2‑3</span></td></tr>
+          <tr><td>OpenCV 3.4 與 Haar 模型檔</td><td>讀攝影機、<code>detectMultiScale</code>、轉色、縮放、<code>warpAffine</code></td><td><code>CascadeClassifier</code> 等</td><td><span class="origin ext">官方現成</span></td></tr>
+          <tr><td>ncnn 與 MobileFaceNet 權重</td><td>跑神經網路、把臉變成 128 個數字</td><td><code>ncnn::Net</code>、<code>Extractor</code></td><td><span class="origin ext">第三方現成</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>畫面中的人物、框和相似度數字是示意；實測數字只有標明「實測」的那一段。程式碼位置對應 <code>lab3/face/src/</code>。</footer>
+</div>
+
+<!-- SRC-BEGIN -->
+<script type="text/plain" id="src-camera-loop" data-file="camera.cpp" data-start="41" data-fn="Camera::loop、Camera::wait_frame">
+void Camera::loop ( )
+{
+    cv::Mat frame;
+    for ( ; ; )
+    {
+        {
+            std::lock_guard<std::mutex> lock ( mtx );
+            if ( !running ) return;
+        }
+        if ( !capture.read ( frame ) || frame.empty ( ) ) continue;
+        struct timeval tv;
+        gettimeofday ( &tv, NULL );     // 跟 main.cpp 的 now_seconds ( ) 用同一個時鐘
+        {
+            std::lock_guard<std::mutex> lock ( mtx );
+            cv::swap ( latest, frame );     // 交換，不複製影像資料
+            latest_time = tv.tv_sec + tv.tv_usec / 1000000.0;
+            frame_id++;
+        }
+        cond.notify_all ( );
+    }
+}
+
+long Camera::wait_frame ( long last_id, cv::Mat &frame, double *captured_at )
+{
+    std::unique_lock<std::mutex> lock ( mtx );
+    bool ok = cond.wait_for ( lock, std::chrono::seconds ( 2 ),
+                              [&] { return !running || frame_id > last_id; } );
+    if ( !ok || !running ) return -1;
+    latest.copyTo ( frame );
+    if ( captured_at ) *captured_at = latest_time;
+    return frame_id;
+}
+</script>
+<script type="text/plain" id="src-detect" data-file="face_detector.cpp" data-start="42" data-fn="FaceDetector::detect">
+std::vector<cv::Rect> FaceDetector::detect ( const cv::Mat &bgr )
+{
+    // 1. 轉灰階並縮小：Haar 只看亮度，縮小可以大幅減少運算量
+    double scale = (double) detect_width / bgr.cols;
+    if ( scale > 1.0 ) scale = 1.0;
+    cv::Mat gray, small;
+    cv::cvtColor ( bgr, gray, cv::COLOR_BGR2GRAY );
+    cv::resize ( gray, small, cv::Size ( ), scale, scale, cv::INTER_AREA );
+
+    // 2. 直方圖等化：降低光線明暗對偵測的影響
+    cv::equalizeHist ( small, small );
+
+    // 3. 多尺度偵測
+    std::vector<cv::Rect> faces;
+    cascade.detectMultiScale ( small, faces, scale_factor, min_neighbors,
+                               cv::CASCADE_SCALE_IMAGE, cv::Size ( min_face, min_face ) );
+
+    // 4. 座標換回原圖
+    for ( size_t i = 0; i < faces.size ( ); i++ )
+    {
+        cv::Rect &r = faces[i];
+        r = cv::Rect ( cvRound ( r.x / scale ), cvRound ( r.y / scale ),
+                       cvRound ( r.width / scale ), cvRound ( r.height / scale ) );
+    }
+
+    // 5. Haar 會在不同縮放層級對同一張臉各給一個框（一大一小），合併成一個
+    return merge_overlaps ( faces, overlap_merge );
+}
+</script>
+<script type="text/plain" id="src-merge" data-file="face_detector.cpp" data-start="22" data-fn="merge_overlaps">
+std::vector<cv::Rect> merge_overlaps ( std::vector<cv::Rect> boxes, double threshold )
+{
+    // 大的框排前面，先保留；之後的框只要跟已保留的框重疊太多就丟掉
+    std::sort ( boxes.begin ( ), boxes.end ( ),
+                [] ( const cv::Rect &a, const cv::Rect &b ) { return a.area ( ) > b.area ( ); } );
+    std::vector<cv::Rect> kept;
+    for ( size_t i = 0; i < boxes.size ( ); i++ )
+    {
+        bool duplicate = false;
+        for ( size_t k = 0; k < kept.size ( ) && !duplicate; k++ )
+        {
+            double inter = ( boxes[i] & kept[k] ).area ( );
+            double smaller = std::min ( boxes[i].area ( ), kept[k].area ( ) );
+            if ( smaller > 0 && inter / smaller > threshold ) duplicate = true;
+        }
+        if ( !duplicate ) kept.push_back ( boxes[i] );
+    }
+    return kept;
+}
+</script>
+<script type="text/plain" id="src-track" data-file="tracker.cpp" data-start="56" data-fn="Tracker::update">
+void Tracker::update ( const std::vector<cv::Rect> &detections, double now )
+{
+    // 1. 找出所有可能是同一張臉的 (track, 偵測框) 配對：
+    //    IoU 夠大，或中心距離夠近（FPS 低、人移動快時 IoU 會很小，靠中心距離補救）；
+    //    大小差太多（超過 2 倍）的不配，避免臉的框被背景小雜點搶走
+    struct Pair { float distance; int t; int d; };
+    std::vector<Pair> pairs;
+    for ( size_t t = 0; t < list.size ( ); t++ )
+        for ( size_t d = 0; d < detections.size ( ); d++ )
+        {
+            cv::Rect2f det ( detections[d] );
+            float size_ratio = det.width / std::max ( list[t].box.width, 1.0f );
+            if ( size_ratio < 0.5f || size_ratio > 2.0f ) continue;
+            float dist = center_distance ( list[t].box, det );
+            if ( iou ( list[t].box, det ) >= iou_match || dist <= center_match )
+                pairs.push_back ( { dist, (int) t, (int) d } );
+        }
+    // 距離最近的先配
+    std::sort ( pairs.begin ( ), pairs.end ( ), [] ( const Pair &a, const Pair &b ) { return a.distance < b.distance; } );
+
+    std::vector<bool> track_used ( list.size ( ), false ), det_used ( detections.size ( ), false );
+    for ( size_t i = 0; i < pairs.size ( ); i++ )
+    {
+        if ( track_used[pairs[i].t] || det_used[pairs[i].d] ) continue;
+        track_used[pairs[i].t] = det_used[pairs[i].d] = true;
+
+        // 2. 配對成功，更新框的位置：
+        //    小幅變動（Haar 每幀框的大小略有不同）→ EMA 平滑：new = alpha * 偵測 + (1 - alpha) * 舊值，消除抖動
+        //    大幅移動（人真的在動）→ 直接跳到新位置，框才不會拖在臉後面
+        Track &tr = list[pairs[i].t];
+        cv::Rect2f det ( detections[pairs[i].d] );
+        float alpha = pairs[i].distance > snap_distance ? 1.0f : ema_alpha;
+        tr.box.x = alpha * det.x + ( 1 - alpha ) * tr.box.x;
+        tr.box.y = alpha * det.y + ( 1 - alpha ) * tr.box.y;
+        tr.box.width = alpha * det.width + ( 1 - alpha ) * tr.box.width;
+        tr.box.height = alpha * det.height + ( 1 - alpha ) * tr.box.height;
+        tr.hits++;
+        tr.missed = 0;
+        tr.last_seen = now;
+    }
+
+    // 3. 這一幀沒被偵測到的 track：短時間內保留舊框（防閃爍），超過 track_timeout 秒才刪掉。
+    //    用時間而不是幀數：FPS 低時，人走掉後舊框也不會殘留好幾秒
+    for ( size_t t = 0; t < list.size ( ); t++ )
+        if ( !track_used[t] ) list[t].missed++;
+    list.erase ( std::remove_if ( list.begin ( ), list.end ( ),
+                                  [this, now] ( const Track &tr ) { return now - tr.last_seen > track_timeout; } ),
+                 list.end ( ) );
+
+    // 4. 沒配對到的偵測框：建立新的 track
+    for ( size_t d = 0; d < detections.size ( ); d++ )
+    {
+        if ( det_used[d] ) continue;
+        Track tr;
+        tr.id = next_id++;
+        tr.box = cv::Rect2f ( detections[d] );
+        tr.hits = 1;
+        tr.last_seen = now;
+        list.push_back ( tr );
+    }
+
+    // 5. 兩個 track 的框重疊太多，代表其實是同一張臉，只留比較久的那個
+    merge_overlapping_tracks ( );
+}
+</script>
+<script type="text/plain" id="src-queue" data-file="main.cpp" data-start="305" data-fn="run_live（第 3 步：送去辨識）">
+        // 3. 需要（重新）辨識的 track 送去背景執行緒：剛出現的立刻送，之後每 recog_interval 秒一次
+        std::vector<Track> &tracks = tracker.tracks ( );
+        for ( size_t i = 0; i < tracks.size ( ); i++ )
+        {
+            Track &tr = tracks[i];
+            if ( !tr.visible ( cfg.min_hits ) || tr.pending || tr.missed > 0 ) continue;
+            if ( now - tr.last_request < cfg.recog_interval ) continue;
+
+            // 只複製臉附近（放大 1.6 倍）的區域，背景執行緒不會碰到正在被修改的整張影像
+            cv::Rect face ( cvRound ( tr.box.x ), cvRound ( tr.box.y ), cvRound ( tr.box.width ), cvRound ( tr.box.height ) );
+            int pad_x = face.width * 3 / 10, pad_y = face.height * 3 / 10;
+            cv::Rect region ( face.x - pad_x, face.y - pad_y, face.width + 2 * pad_x, face.height + 2 * pad_y );
+            region &= cv::Rect ( 0, 0, frame.cols, frame.rows );
+            if ( region.area ( ) <= 0 ) continue;
+
+            RecogJob job;
+            job.track_id = tr.id;
+            job.region = frame ( region ).clone ( );
+            job.face = face - region.tl ( );
+            if ( recognizer.push ( job ) )
+            {
+                tr.pending = true;
+                tr.last_request = now;
+            }
+        }
+</script>
+<script type="text/plain" id="src-push" data-file="recognizer.cpp" data-start="31" data-fn="Recognizer::push">
+bool Recognizer::push ( const RecogJob &job )
+{
+    {
+        std::lock_guard<std::mutex> lock ( mtx );
+        if ( jobs.size ( ) >= MAX_JOBS ) return false;
+        jobs.push ( job );
+    }
+    cond.notify_one ( );
+    return true;
+}
+</script>
+<script type="text/plain" id="src-recog-loop" data-file="recognizer.cpp" data-start="50" data-fn="Recognizer::loop">
+void Recognizer::loop ( )
+{
+    for ( ; ; )
+    {
+        RecogJob job;
+        {
+            std::unique_lock<std::mutex> lock ( mtx );
+            cond.wait ( lock, [this] { return stopping || !jobs.empty ( ); } );
+            if ( stopping ) return;
+            job = jobs.front ( );
+            jobs.pop ( );
+        }
+
+        std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now ( );
+        cv::Mat aligned = aligner.align ( job.region, job.face );
+        std::vector<float> feature = embedder.embed ( aligned );
+        MatchResult m = gallery->match ( feature, threshold, margin );
+        double ms = std::chrono::duration<double, std::milli> ( std::chrono::steady_clock::now ( ) - t0 ).count ( );
+
+        RecogResult r;
+        r.track_id = job.track_id;
+        r.label = m.index >= 0 ? m.index : LABEL_UNKNOWN;
+        r.score = m.best;
+        r.millis = ms;
+        {
+            std::lock_guard<std::mutex> lock ( mtx );
+            results.push_back ( r );
+        }
+    }
+}
+</script>
+<script type="text/plain" id="src-align" data-file="face_aligner.cpp" data-start="71" data-fn="FaceAligner::align">
+cv::Mat FaceAligner::align ( const cv::Mat &bgr, const cv::Rect &face, bool *eyes_found )
+{
+    cv::Point2f left, right;
+    bool found = find_eyes ( bgr, face, left, right );
+    if ( !found )
+    {
+        left = cv::Point2f ( face.x + face.width * GUESS_EYE_X_LEFT, face.y + face.height * GUESS_EYE_Y );
+        right = cv::Point2f ( face.x + face.width * GUESS_EYE_X_RIGHT, face.y + face.height * GUESS_EYE_Y );
+    }
+    if ( eyes_found ) *eyes_found = found;
+
+    // 相似變換（旋轉 + 等比例縮放 + 平移）：把 (left, right) 對到樣板的兩眼位置
+    cv::Point2f src = right - left;
+    cv::Point2f dst = TEMPLATE_RIGHT_EYE - TEMPLATE_LEFT_EYE;
+    double scale = std::sqrt ( dst.dot ( dst ) / src.dot ( src ) );
+    double angle = std::atan2 ( dst.y, dst.x ) - std::atan2 ( src.y, src.x );
+    double a = scale * std::cos ( angle );
+    double b = scale * std::sin ( angle );
+    // [x'] = [a -b] [x] + [tx]
+    // [y']   [b  a] [y]   [ty]，平移量讓左眼剛好落在樣板左眼
+    double tx = TEMPLATE_LEFT_EYE.x - ( a * left.x - b * left.y );
+    double ty = TEMPLATE_LEFT_EYE.y - ( b * left.x + a * left.y );
+    cv::Mat M = ( cv::Mat_<double> ( 2, 3 ) << a, -b, tx, b, a, ty );
+
+    cv::Mat aligned;
+    cv::warpAffine ( bgr, aligned, M, cv::Size ( ALIGNED_SIZE, ALIGNED_SIZE ),
+                     cv::INTER_LINEAR, cv::BORDER_REPLICATE );
+    return aligned;
+}
+</script>
+<script type="text/plain" id="src-embed" data-file="face_embedder.cpp" data-start="27" data-fn="FaceEmbedder::embed">
+std::vector<float> FaceEmbedder::embed ( const cv::Mat &aligned_bgr )
+{
+    // 影像轉成 ncnn::Mat。這個 MobileFaceNet 模型的 param 檔第一層已經內含
+    // (x - 127.5) * 0.0078125 的正規化，所以這裡不用再減平均值
+    int type = input_rgb ? ncnn::Mat::PIXEL_BGR2RGB : ncnn::Mat::PIXEL_BGR;
+    ncnn::Mat in = ncnn::Mat::from_pixels ( aligned_bgr.data, type, aligned_bgr.cols, aligned_bgr.rows );
+
+    ncnn::Extractor ex = net.create_extractor ( );
+    ex.input ( input_blob.c_str ( ), in );
+    ncnn::Mat out;
+    ex.extract ( output_blob.c_str ( ), out );
+
+    // 攤平成一維（如果輸出是 c×h×w 的 3D blob，reshape 會處理 ncnn 每個 channel 的對齊間隔）
+    ncnn::Mat flat = out.reshape ( out.w * out.h * out.c );
+    std::vector<float> feature ( flat.w );
+    const float *p = (const float *) flat.data;
+    for ( size_t i = 0; i < feature.size ( ); i++ ) feature[i] = p[i];
+    l2_normalize ( feature );
+    return feature;
+}
+</script>
+<script type="text/plain" id="src-match" data-file="gallery.cpp" data-start="79" data-fn="Gallery::match">
+MatchResult Gallery::match ( const std::vector<float> &embedding, float threshold, float margin ) const
+{
+    MatchResult result;
+    int best_index = -1;
+    for ( size_t i = 0; i < persons.size ( ); i++ )
+    {
+        float s = cosine_similarity ( embedding, persons[i].mean );
+        if ( s > result.best )
+        {
+            result.second = result.best;
+            result.best = s;
+            best_index = (int) i;
+        }
+        else if ( s > result.second )
+        {
+            result.second = s;
+        }
+    }
+    if ( best_index >= 0 && result.best >= threshold && result.best - result.second >= margin )
+        result.index = best_index;
+    return result;
+}
+</script>
+<script type="text/plain" id="src-collect" data-file="main.cpp" data-start="295" data-fn="run_live（第 2 步：收回結果）">
+        // 2. 收回背景辨識的結果，加進各 track 的投票
+        std::vector<RecogResult> results = recognizer.take_results ( );
+        for ( size_t i = 0; i < results.size ( ); i++ )
+        {
+            tracker.add_vote ( results[i].track_id, results[i].label, results[i].score );
+            recog_ms += results[i].millis;
+            recog_count++;
+        }
+        tracker.resolve_duplicates ( );
+</script>
+<script type="text/plain" id="src-vote" data-file="tracker.cpp" data-start="148" data-fn="Tracker::add_vote">
+void Tracker::add_vote ( int track_id, int label, float score )
+{
+    Track *tr = find ( track_id );
+    if ( !tr ) return;      // 辨識完成前這張臉已經離開畫面
+    tr->pending = false;
+    tr->votes.push_back ( std::make_pair ( label, score ) );
+    while ( (int) tr->votes.size ( ) > vote_window ) tr->votes.pop_front ( );
+
+    // 第一次結果直接顯示，讓畫面盡快出現標籤
+    if ( tr->shown_label == LABEL_PENDING )
+    {
+        tr->shown_label = label;
+        return;
+    }
+
+    // 多數決 + 遲滯：新的標籤至少要 vote_min 票，而且票數多於目前顯示的標籤，才換掉
+    std::map<int, int> count;
+    for ( size_t i = 0; i < tr->votes.size ( ); i++ ) count[tr->votes[i].first]++;
+    int top_label = tr->shown_label, top_count = count[tr->shown_label];
+    for ( std::map<int, int>::iterator it = count.begin ( ); it != count.end ( ); ++it )
+    {
+        if ( it->second > top_count )
+        {
+            top_label = it->first;
+            top_count = it->second;
+        }
+    }
+    if ( top_label != tr->shown_label && top_count >= vote_min ) tr->shown_label = top_label;
+}
+</script>
+<script type="text/plain" id="src-dedup" data-file="tracker.cpp" data-start="178" data-fn="Tracker::resolve_duplicates">
+void Tracker::resolve_duplicates ( )
+{
+    // 兩個框都顯示同一位組員時，保留平均相似度較高的那個，另一個改成 unknown
+    for ( size_t i = 0; i < list.size ( ); i++ )
+    {
+        if ( list[i].shown_label < 0 ) continue;
+        for ( size_t j = i + 1; j < list.size ( ); j++ )
+        {
+            if ( list[j].shown_label != list[i].shown_label ) continue;
+            if ( list[i].mean_score ( list[i].shown_label ) >= list[j].mean_score ( list[j].shown_label ) )
+                list[j].shown_label = LABEL_UNKNOWN;
+            else
+            {
+                list[i].shown_label = LABEL_UNKNOWN;
+                break;
+            }
+        }
+    }
+}
+</script>
+<script type="text/plain" id="src-draw" data-file="main.cpp" data-start="217" data-fn="draw_tracks">
+static void draw_tracks ( cv::Mat &frame, Tracker &tracker, const Gallery &gallery, int min_hits )
+{
+    std::vector<Track> &tracks = tracker.tracks ( );
+    for ( size_t i = 0; i < tracks.size ( ); i++ )
+    {
+        const Track &tr = tracks[i];
+        if ( !tr.visible ( min_hits ) ) continue;
+        std::string text;
+        if ( tr.shown_label == LABEL_PENDING ) text = "...";
+        else if ( tr.shown_label == LABEL_UNKNOWN ) text = "unknown";
+        else text = gallery.people ( )[tr.shown_label].label;
+
+        cv::Scalar color = label_color ( tr.shown_label );
+        cv::Rect box ( cvRound ( tr.box.x ), cvRound ( tr.box.y ), cvRound ( tr.box.width ), cvRound ( tr.box.height ) );
+        cv::rectangle ( frame, box, color, 2 );
+        int baseline = 0;
+        cv::Size ts = cv::getTextSize ( text, cv::FONT_HERSHEY_SIMPLEX, 0.7, 2, &baseline );
+        cv::Point org ( box.x, std::max ( ts.height + 4, box.y - 6 ) );
+        cv::rectangle ( frame, cv::Rect ( org.x, org.y - ts.height - 4, ts.width + 6, ts.height + 8 ), color, cv::FILLED );
+        cv::putText ( frame, text, cv::Point ( org.x + 3, org.y ), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar ( 0, 0, 0 ), 2 );
+    }
+}
+</script>
+<script type="text/plain" id="src-show" data-file="framebuffer.cpp" data-start="80" data-fn="Framebuffer::show">
+void Framebuffer::show ( const cv::Mat &bgr, bool fit )
+{
+    if ( !mem || bgr.empty ( ) ) return;
+
+    int type;
+    if ( bits_per_pixel == 16 ) type = CV_8UC2;
+    else if ( bits_per_pixel == 24 ) type = CV_8UC3;
+    else if ( bits_per_pixel == 32 ) type = CV_8UC4;
+    else
+    {
+        fprintf ( stderr, "unsupported framebuffer depth: %u bpp\n", bits_per_pixel );
+        return;
+    }
+
+    // 等比例縮放，取寬、高比例較小的那個，保證整張圖放得進螢幕。
+    // fit = false（原尺寸顯示）時只縮小不放大：640x480 的畫面在 1080p 螢幕上維持 640x480，
+    // 每幀要寫的資料從約 6 MB 降到約 1.2 MB
+    double scale = std::min ( (double) xres / bgr.cols, (double) yres / bgr.rows );
+    if ( !fit && scale > 1.0 ) scale = 1.0;
+    int w = std::max ( 1, (int) ( bgr.cols * scale ) );
+    int h = std::max ( 1, (int) ( bgr.rows * scale ) );
+
+    cv::Mat shown;
+    if ( w != bgr.cols || h != bgr.rows )
+        // 放大用 INTER_NEAREST（最快）；縮小用 INTER_AREA（3.2 的大圖縮小時比較不會有鋸齒）
+        cv::resize ( bgr, shown, cv::Size ( w, h ), 0, 0, scale < 1.0 ? cv::INTER_AREA : cv::INTER_NEAREST );
+    else
+        shown = bgr;
+
+    if ( shown.size ( ) != last_size )
+    {
+        clear ( );      // 尺寸改變時清掉舊的黑邊
+        last_size = shown.size ( );
+    }
+
+    // 直接在 framebuffer 記憶體上建立一個 Mat（置中的那一塊），轉色時結果直接寫進螢幕，
+    // 不需要先轉到暫存影像再一列一列 memcpy
+    const int x_offset = ( xres - w ) / 2;
+    const int y_offset = ( yres - h ) / 2;
+    cv::Mat screen ( h, w, type, mem + y_offset * line_length + x_offset * ( bits_per_pixel / 8 ), line_length );
+    convert ( shown, screen );
+}
+</script>
+<script type="text/plain" id="src-convert" data-file="framebuffer.cpp" data-start="67" data-fn="Framebuffer::convert">
+void Framebuffer::convert ( const cv::Mat &bgr, cv::Mat &screen ) const
+{
+    // screen 是指向 framebuffer 記憶體的 Mat，大小和型別都已經對了，cvtColor 會直接寫進去
+    if ( bits_per_pixel == 16 )
+        cv::cvtColor ( bgr, screen, cv::COLOR_BGR2BGR565 );
+    else if ( bits_per_pixel == 32 )
+        cv::cvtColor ( bgr, screen, red_offset == 0 ? cv::COLOR_BGR2RGBA : cv::COLOR_BGR2BGRA );
+    else if ( bits_per_pixel == 24 && red_offset == 0 )
+        cv::cvtColor ( bgr, screen, cv::COLOR_BGR2RGB );
+    else
+        bgr.copyTo ( screen );
+}
+</script>
+<!-- SRC-END -->
+<script>
+(function () {
+  "use strict";
+
+  // ---------- scene model (640x480 camera frame) ----------
+  var P = [
+    { cx: 170, cy: 196, r: 50, shirt: "--shirt-a", label: "314831017", kind: "member", glasses: false, id: 3 },
+    { cx: 335, cy: 182, r: 48, shirt: "--shirt-b", label: "314581047", kind: "member", glasses: false, id: 5 },
+    { cx: 505, cy: 206, r: 46, shirt: "--shirt-c", label: "unknown", kind: "unknown", glasses: true, id: 8 }
+  ];
+  var FALSE_BOX = { x: 420, y: 52, w: 46, h: 46 };
+
+  function v(name) { return "var(" + name + ")"; }
+  function box(p) { return { x: p.cx - 0.95 * p.r, y: p.cy - 1.02 * p.r, w: 1.9 * p.r, h: 2.02 * p.r }; }
+  function rect(b, attrs) { return '<rect x="' + b.x.toFixed(1) + '" y="' + b.y.toFixed(1) + '" width="' + b.w.toFixed(1) + '" height="' + b.h.toFixed(1) + '" ' + attrs + '/>'; }
+
+  function person(p) {
+    var r = p.r, cx = p.cx, cy = p.cy;
+    var s = '<g>';
+    s += '<path d="M' + (cx - 2 * r) + ' 480 Q' + (cx - 1.9 * r) + ' ' + (cy + 1.25 * r) + ' ' + cx + ' ' + (cy + 1.15 * r) +
+         ' Q' + (cx + 1.9 * r) + ' ' + (cy + 1.25 * r) + ' ' + (cx + 2 * r) + ' 480 Z" fill="' + v(p.shirt) + '"/>';
+    s += '<rect x="' + (cx - 0.28 * r) + '" y="' + (cy + 0.7 * r) + '" width="' + (0.56 * r) + '" height="' + (0.5 * r) + '" fill="' + v("--skin") + '"/>';
+    s += '<ellipse cx="' + cx + '" cy="' + cy + '" rx="' + (0.82 * r) + '" ry="' + r + '" fill="' + v("--skin") + '"/>';
+    s += '<path d="M' + (cx - 0.86 * r) + ' ' + (cy - 0.15 * r) + ' Q' + (cx - 0.9 * r) + ' ' + (cy - 1.15 * r) + ' ' + cx + ' ' + (cy - 1.08 * r) +
+         ' Q' + (cx + 0.9 * r) + ' ' + (cy - 1.15 * r) + ' ' + (cx + 0.86 * r) + ' ' + (cy - 0.15 * r) +
+         ' Q' + (cx + 0.5 * r) + ' ' + (cy - 0.75 * r) + ' ' + cx + ' ' + (cy - 0.7 * r) +
+         ' Q' + (cx - 0.5 * r) + ' ' + (cy - 0.75 * r) + ' ' + (cx - 0.86 * r) + ' ' + (cy - 0.15 * r) + ' Z" fill="' + v("--hair") + '"/>';
+    var ey = cy - 0.08 * r;
+    s += '<circle cx="' + (cx - 0.33 * r) + '" cy="' + ey + '" r="' + (0.07 * r) + '" fill="' + v("--hair") + '"/>';
+    s += '<circle cx="' + (cx + 0.33 * r) + '" cy="' + ey + '" r="' + (0.07 * r) + '" fill="' + v("--hair") + '"/>';
+    if (p.glasses) {
+      s += '<circle cx="' + (cx - 0.33 * r) + '" cy="' + ey + '" r="' + (0.2 * r) + '" fill="none" stroke="' + v("--hair") + '" stroke-width="2"/>';
+      s += '<circle cx="' + (cx + 0.33 * r) + '" cy="' + ey + '" r="' + (0.2 * r) + '" fill="none" stroke="' + v("--hair") + '" stroke-width="2"/>';
+    }
+    s += '<path d="M' + (cx - 0.22 * r) + ' ' + (cy + 0.45 * r) + ' Q' + cx + ' ' + (cy + 0.58 * r) + ' ' + (cx + 0.22 * r) + ' ' + (cy + 0.45 * r) + '" fill="none" stroke="' + v("--hair") + '" stroke-width="2" stroke-linecap="round"/>';
+    return s + '</g>';
+  }
+
+  function room(gray) {
+    var s = '<g' + (gray ? ' filter="url(#gray)"' : '') + '>';
+    s += '<rect x="0" y="0" width="640" height="480" fill="' + v("--scene-wall") + '"/>';
+    s += '<rect x="0" y="300" width="640" height="180" fill="' + v("--scene-floor") + '"/>';
+    s += '<rect x="360" y="104" width="250" height="10" fill="' + v("--scene-desk") + '"/>';
+    s += '<rect x="402" y="40" width="96" height="62" rx="3" fill="' + v("--scene-monitor") + '"/>';
+    s += '<rect x="444" y="102" width="12" height="4" fill="' + v("--scene-monitor") + '"/>';
+    for (var i = 0; i < P.length; i++) s += person(P[i]);
+    return s + '</g>';
+  }
+
+  function defs() {
+    return '<defs><filter id="gray"><feColorMatrix type="saturate" values="0"/></filter>' +
+      '<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="' + v("--accent") + '"/></marker></defs>';
+  }
+
+  function tag(x, y, text, color, cls) {
+    var w = Math.max(40, text.length * 8.6 + 14);
+    return '<g class="' + (cls || "") + '"><rect x="' + x + '" y="' + (y - 22) + '" width="' + w + '" height="22" fill="' + color + '"/>' +
+      '<text x="' + (x + 7) + '" y="' + (y - 6) + '" font-family="JetBrains Mono, monospace" font-size="14" font-weight="600" fill="#ffffff">' + text + '</text></g>';
+  }
+  function caption(text) {
+    return '<g><rect x="10" y="446" width="' + (text.length * 13 + 24) + '" height="24" rx="4" fill="rgba(0,0,0,.55)"/>' +
+      '<text x="22" y="463" font-size="13" fill="' + v("--scene-text") + '" font-family="Noto Sans TC, sans-serif">' + text + '</text></g>';
+  }
+  function colorOf(kind) { return kind === "member" ? v("--member") : kind === "unknown" ? v("--unknown") : v("--pending"); }
+
+  // deterministic pseudo-random for the 128-d bars
+  function rng(seed) { return function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }; }
+  function vec(seed) { var g = rng(seed), a = []; for (var i = 0; i < 128; i++) a.push(g() * 2 - 1); return a; }
+  var TA = vec(11), TB = vec(29);
+  function near(t, seed, k) { var g = rng(seed); return t.map(function (x) { return x * (1 - k) + (g() * 2 - 1) * k; }); }
+  var EMB = [near(TA, 101, 0.25), near(TB, 202, 0.3), vec(303)];
+
+  function bars(x, y, w, h, a, color) {
+    var bw = w / a.length, s = '';
+    for (var i = 0; i < a.length; i++) {
+      var bh = Math.abs(a[i]) * h / 2, by = a[i] >= 0 ? y + h / 2 - bh : y + h / 2;
+      s += '<rect x="' + (x + i * bw).toFixed(2) + '" y="' + by.toFixed(1) + '" width="' + Math.max(0.6, bw - 0.35).toFixed(2) + '" height="' + bh.toFixed(1) + '" fill="' + color + '"/>';
+    }
+    return s + '<line x1="' + x + '" y1="' + (y + h / 2) + '" x2="' + (x + w) + '" y2="' + (y + h / 2) + '" stroke="' + v("--line") + '" stroke-width="1"/>';
+  }
+
+  // ---------- scenes per step ----------
+  var scenes = [];
+
+  // 1 camera
+  scenes[0] = function () {
+    var s = defs() + room(false);
+    s += '<g class="fade d1"><rect x="560" y="12" width="64" height="48" fill="none" stroke="' + v("--scene-text") + '" stroke-opacity=".35" stroke-dasharray="4 3"/>' +
+         '<rect x="566" y="18" width="64" height="48" fill="none" stroke="' + v("--scene-text") + '" stroke-opacity=".55" stroke-dasharray="4 3"/>' +
+         '<text x="520" y="84" font-size="12" fill="' + v("--scene-text") + '" font-family="Noto Sans TC, sans-serif">舊畫面被新的覆蓋</text></g>';
+    s += '<g><rect x="10" y="10" width="236" height="26" rx="4" fill="rgba(0,0,0,.55)"/><text x="20" y="28" font-size="13" fill="#fff" font-family="JetBrains Mono, monospace">frame #1287 · 640×480 · MJPG</text></g>';
+    s += caption("攝影機執行緒一直讀，主迴圈永遠拿最新的一張");
+    return s;
+  };
+
+  // 2 Haar detect
+  scenes[1] = function () {
+    var s = defs() + room(true);
+    s += '<rect class="scan" x="20" y="20" width="60" height="60" fill="none" stroke="' + v("--accent") + '" stroke-width="2"/>';
+    var jit = [[-6, -4, 8], [5, 3, -6], [-2, 6, 2]];
+    for (var i = 0; i < P.length; i++) {
+      var b = box(P[i]);
+      for (var j = 0; j < jit.length; j++) {
+        s += rect({ x: b.x + jit[j][0], y: b.y + jit[j][1], w: b.w + jit[j][2], h: b.h + jit[j][2] }, 'class="fade d1" fill="none" stroke="' + v("--accent") + '" stroke-opacity=".55" stroke-dasharray="3 3"');
+      }
+      s += rect({ x: b.x + b.w * 0.22, y: b.y + b.h * 0.12, w: b.w * 0.56, h: b.h * 0.4 }, 'class="fade d2" fill="none" stroke="' + v("--unknown") + '" stroke-dasharray="3 3" stroke-width="1.5"');
+      s += rect(b, 'class="fade d3" fill="none" stroke="' + v("--accent") + '" stroke-width="3"');
+    }
+    s += rect(FALSE_BOX, 'class="fade d2" fill="none" stroke="' + v("--accent") + '" stroke-width="2.5"');
+    s += '<text class="fade d2" x="472" y="70" font-size="12" fill="' + v("--scene-text") + '" font-family="Noto Sans TC, sans-serif">誤判（螢幕邊框）</text>';
+    s += '<text class="fade d3" x="12" y="400" font-size="13" fill="' + v("--scene-text") + '" font-family="Noto Sans TC, sans-serif">紅色虛線＝一大一小的重複框 → merge_overlaps 只留大的</text>';
+    s += '<g><rect x="10" y="10" width="200" height="26" rx="4" fill="rgba(0,0,0,.55)"/><text x="20" y="28" font-size="13" fill="#fff" font-family="JetBrains Mono, monospace">gray · 320×240 · equalize</text></g>';
+    s += caption("Haar 掃過整張圖，找出「像臉」的明暗圖樣");
+    return s;
+  };
+
+  // 3 track
+  scenes[2] = function () {
+    var s = defs() + room(false);
+    for (var i = 0; i < P.length; i++) {
+      var b = box(P[i]), old = { x: b.x - 18, y: b.y + 6, w: b.w, h: b.h };
+      s += rect(old, 'fill="none" stroke="' + v("--scene-text") + '" stroke-opacity=".7" stroke-dasharray="5 4" stroke-width="2"');
+      s += '<line class="fade d1" x1="' + (old.x + old.w / 2) + '" y1="' + (old.y + old.h / 2) + '" x2="' + (b.x + b.w / 2 - 4) + '" y2="' + (b.y + b.h / 2) + '" stroke="' + v("--accent") + '" stroke-width="2.5" marker-end="url(#arr)"/>';
+      s += rect(b, 'class="fade d2" fill="none" stroke="' + v("--accent") + '" stroke-width="3"');
+      s += tag(b.x, b.y, "#" + P[i].id, v("--accent"), "fade d2");
+    }
+    s += rect(FALSE_BOX, 'class="fade d3" fill="none" stroke="' + v("--scene-text") + '" stroke-opacity=".8" stroke-dasharray="3 3"');
+    s += '<text class="fade d3" x="470" y="66" font-size="12" fill="' + v("--scene-text") + '" font-family="Noto Sans TC, sans-serif">#9 只出現 1 次</text>';
+    s += '<text class="fade d3" x="470" y="82" font-size="12" fill="' + v("--scene-text") + '" font-family="Noto Sans TC, sans-serif">未滿 min_hits，不畫</text>';
+    s += caption("虛線＝上一幀的框；距離夠近就是同一張臉，沿用編號");
+    return s;
+  };
+
+  // 4 queue jobs
+  scenes[3] = function () {
+    var s = defs() + room(false);
+    for (var i = 0; i < P.length; i++) {
+      var b = box(P[i]), px = b.w * 0.3, py = b.h * 0.3;
+      s += rect(b, 'fill="none" stroke="' + v("--accent") + '" stroke-width="3"');
+      s += rect({ x: b.x - px, y: b.y - py, w: b.w + 2 * px, h: b.h + 2 * py }, 'class="fade d1" fill="none" stroke="' + v("--pending") + '" stroke-width="2" stroke-dasharray="6 4"');
+      s += tag(b.x, b.y, "#" + P[i].id, v("--accent"));
+    }
+    s += '<g class="fade d2"><rect x="380" y="352" width="250" height="88" rx="6" fill="rgba(0,0,0,.6)"/>' +
+         '<text x="394" y="374" font-size="13" fill="#fff" font-family="Noto Sans TC, sans-serif">工作佇列（最多 4 個）</text>';
+    for (var k = 0; k < 4; k++) {
+      var filled = k < 3;
+      s += '<rect class="' + (filled ? "fly d" + (k + 2) : "") + '" x="' + (394 + k * 58) + '" y="386" width="48" height="42" rx="4" fill="' + (filled ? v("--pending") : "none") + '" stroke="#fff" stroke-opacity=".5" stroke-dasharray="' + (filled ? "0" : "4 3") + '"/>';
+      if (filled) s += '<text class="fly d' + (k + 2) + '" x="' + (404 + k * 58) + '" y="412" font-size="13" fill="#fff" font-family="JetBrains Mono, monospace">#' + P[k].id + '</text>';
+    }
+    s += '</g>';
+    s += caption("黃色虛線＝複製下來的區域（臉框放大 1.6 倍）");
+    return s;
+  };
+
+  // 5 recognize
+  scenes[4] = function () {
+    var s = defs() + '<rect x="0" y="0" width="640" height="480" fill="' + v("--surface") + '"/>';
+    var heads = ["--shirt-a", "--shirt-b", "--shirt-c"];
+    s += '<text x="14" y="26" font-size="12" fill="' + v("--muted") + '" font-family="JetBrains Mono, monospace">crop</text>' +
+         '<text x="96" y="26" font-size="12" fill="' + v("--muted") + '" font-family="JetBrains Mono, monospace">align 112×112</text>' +
+         '<text x="212" y="26" font-size="12" fill="' + v("--muted") + '" font-family="JetBrains Mono, monospace">MobileFaceNet</text>' +
+         '<text x="330" y="26" font-size="12" fill="' + v("--muted") + '" font-family="JetBrains Mono, monospace">128-d 特徵</text>' +
+         '<text x="510" y="26" font-size="12" fill="' + v("--muted") + '" font-family="JetBrains Mono, monospace">cos 相似度</text>';
+    var sims = [[0.91, 0.07], [0.06, 0.88], [0.12, 0.09]];
+    for (var i = 0; i < 3; i++) {
+      var y = 46 + i * 144, cls = "fade d" + (i + 1);
+      var p = { cx: 40, cy: y + 52, r: 26, shirt: heads[i], glasses: i === 2 };
+      s += '<g class="' + cls + '"><g transform="rotate(' + (i === 1 ? -12 : 8) + ' 40 ' + (y + 52) + ')"><clipPath id="c' + i + '"><rect x="6" y="' + y + '" width="68" height="100"/></clipPath><g clip-path="url(#c' + i + ')">' + person(p) + '</g></g>';
+      s += '<rect x="6" y="' + y + '" width="68" height="100" fill="none" stroke="' + v("--pending") + '" stroke-dasharray="5 3"/></g>';
+      s += '<line class="' + cls + '" x1="80" y1="' + (y + 50) + '" x2="96" y2="' + (y + 50) + '" stroke="' + v("--accent") + '" stroke-width="2" marker-end="url(#arr)"/>';
+      // aligned square: eyes on template positions (38.3,51.7) and (73.5,51.5) of 112
+      var ax = 100, ay = y + 10, sz = 84, k = sz / 112;
+      var p2 = { cx: ax + sz / 2, cy: ay + sz * 0.55, r: sz * 0.4, shirt: heads[i], glasses: i === 2 };
+      s += '<g class="' + cls + '"><clipPath id="a' + i + '"><rect x="' + ax + '" y="' + ay + '" width="' + sz + '" height="' + sz + '"/></clipPath><g clip-path="url(#a' + i + ')"><rect x="' + ax + '" y="' + ay + '" width="' + sz + '" height="' + sz + '" fill="' + v("--scene-wall") + '"/>' + person(p2) + '</g>';
+      s += '<rect x="' + ax + '" y="' + ay + '" width="' + sz + '" height="' + sz + '" fill="none" stroke="' + v("--ink") + '" stroke-width="1.5"/>';
+      s += '<circle cx="' + (ax + 38.3 * k) + '" cy="' + (ay + 51.7 * k) + '" r="4" fill="none" stroke="' + v("--accent") + '" stroke-width="2"/><circle cx="' + (ax + 73.5 * k) + '" cy="' + (ay + 51.5 * k) + '" r="4" fill="none" stroke="' + v("--accent") + '" stroke-width="2"/></g>';
+      s += '<line class="' + cls + '" x1="190" y1="' + (y + 50) + '" x2="208" y2="' + (y + 50) + '" stroke="' + v("--accent") + '" stroke-width="2" marker-end="url(#arr)"/>';
+      s += '<g class="' + cls + '"><rect x="212" y="' + (y + 30) + '" width="104" height="40" rx="6" fill="' + v("--ink") + '"/><text x="224" y="' + (y + 55) + '" font-size="12.5" fill="' + v("--bg") + '" font-family="JetBrains Mono, monospace">ncnn · CNN</text></g>';
+      s += '<line class="' + cls + '" x1="318" y1="' + (y + 50) + '" x2="330" y2="' + (y + 50) + '" stroke="' + v("--accent") + '" stroke-width="2" marker-end="url(#arr)"/>';
+      s += '<g class="' + cls + '">' + bars(334, y + 14, 164, 72, EMB[i], v("--accent")) + '</g>';
+      var best = Math.max(sims[i][0], sims[i][1]), second = Math.min(sims[i][0], sims[i][1]);
+      var ok = best >= 0.45 && best - second >= 0.08, who = ok ? (sims[i][0] > sims[i][1] ? "314831017" : "314581047") : "unknown";
+      s += '<g class="' + cls + '"><text x="508" y="' + (y + 34) + '" font-size="12.5" fill="' + v("--ink") + '" font-family="JetBrains Mono, monospace">017 ' + sims[i][0].toFixed(2) + '</text>' +
+           '<text x="508" y="' + (y + 54) + '" font-size="12.5" fill="' + v("--ink") + '" font-family="JetBrains Mono, monospace">047 ' + sims[i][1].toFixed(2) + '</text>' +
+           '<rect x="506" y="' + (y + 64) + '" width="' + (who.length * 8.4 + 14) + '" height="22" rx="11" fill="' + (ok ? v("--member") : v("--unknown")) + '"/>' +
+           '<text x="513" y="' + (y + 80) + '" font-size="12.5" font-weight="600" fill="#fff" font-family="JetBrains Mono, monospace">' + who + '</text></g>';
+    }
+    return s;
+  };
+
+  // 6 vote
+  scenes[5] = function () {
+    var s = defs() + room(false);
+    var hist = [
+      ["A", "A", "A", "B", "A", "A", "A"],
+      ["B", "B", "?", "B", "B", "B", "B"],
+      ["?", "?", "?", "?", "?", "?", "?"]
+    ];
+    for (var i = 0; i < P.length; i++) {
+      var b = box(P[i]), col = colorOf(P[i].kind);
+      s += rect(b, 'fill="none" stroke="' + col + '" stroke-width="3"');
+      s += tag(b.x, b.y, P[i].label, col);
+      var cy = b.y + b.h + 64;
+      s += '<g class="fade d' + (i + 1) + '"><rect x="' + (P[i].cx - 76) + '" y="' + (cy - 14) + '" width="152" height="28" rx="4" fill="rgba(0,0,0,.55)"/>';
+      for (var k = 0; k < 7; k++) {
+        var h = hist[i][k], c = h === "A" || h === "B" ? v("--member") : v("--unknown");
+        if ((i === 0 && h === "B")) c = v("--pending");
+        s += '<rect x="' + (P[i].cx - 70 + k * 20) + '" y="' + (cy - 8) + '" width="16" height="16" rx="3" fill="' + c + '"/>' +
+             '<text x="' + (P[i].cx - 66 + k * 20) + '" y="' + (cy + 4) + '" font-size="11" font-weight="600" fill="#fff" font-family="JetBrains Mono, monospace">' + (h === "?" ? "U" : h) + '</text>';
+      }
+      s += '</g>';
+    }
+    s += '<text class="fade d3" x="70" y="410" font-size="12.5" fill="' + v("--scene-text") + '" font-family="Noto Sans TC, sans-serif">#3 有一票錯成 B（黃色），但只有 1 票，不會換標籤</text>';
+    s += caption("每個框保留最近 7 次結果：A=314831017、B=314581047、U=unknown");
+    return s;
+  };
+
+  // 7 display
+  var fitMode = 0;
+  scenes[6] = function () {
+    var s = defs() + '<rect x="0" y="0" width="640" height="480" fill="' + v("--surface") + '"/>';
+    s += '<rect x="0" y="60" width="640" height="360" fill="#000"/>';
+    s += '<text x="10" y="46" font-size="12.5" fill="' + v("--muted") + '" font-family="JetBrains Mono, monospace">HDMI /dev/fb2 · 1920×1080 · 32 bpp</text>';
+    var fw, fh;
+    if (fitMode) { fw = 480; fh = 360; } else { fw = 640 / 3; fh = 480 / 3; }
+    var fx = (640 - fw) / 2, fy = 60 + (360 - fh) / 2;
+    s += '<svg x="' + fx + '" y="' + fy + '" width="' + fw + '" height="' + fh + '" viewBox="0 0 640 480">' + room(false);
+    for (var i = 0; i < P.length; i++) { var b = box(P[i]), col = colorOf(P[i].kind); s += rect(b, 'fill="none" stroke="' + col + '" stroke-width="4"') + tag(b.x, b.y, P[i].label, col); }
+    s += '</svg>';
+    var mb = fitMode ? "約 6 MB／幀（1440×1080 放大）" : "約 1.2 MB／幀（640×480 原尺寸）";
+    s += '<text x="10" y="446" font-size="13" fill="' + v("--ink") + '" font-family="Noto Sans TC, sans-serif">display_fit: ' + fitMode + ' → ' + mb + '</text>';
+    s += '<text x="10" y="466" font-size="12" fill="' + v("--muted") + '" font-family="Noto Sans TC, sans-serif">等比例縮放、置中，畫面不變形；右側按鈕可以切換比較</text>';
+    return s;
+  };
+
+  // ---------- step notes ----------
+  var STEPS = [
+    {
+      short: "讀攝影機", lane: 0, scope: "camera thread · Camera::loop",
+      lead: "攝影機執行緒不停讀畫面，每讀到一張新的就覆蓋舊的。主迴圈處理得比較慢也沒關係，它每次拿到的都是最新的那一張，不會越積越延遲。",
+      bullets: ["用 OpenCV 的 VideoCapture 打開 /dev/video2，格式 MJPG、640×480。", "讀到新畫面就用 cv::swap 換掉舊的（不複製影像資料），並記下時間，之後用來算延遲。", "主迴圈呼叫 wait_frame 等「比上次更新的那一張」。"],
+      code: [["camera.cpp", "Camera::open", "設定 MJPG、解析度"], ["camera.cpp", "Camera::loop", "背景一直 read，只留最新一張"], ["camera.cpp", "Camera::wait_frame", "主迴圈拿最新畫面"]],
+      params: [["camera_index", "2"], ["camera_width", "640"], ["camera_height", "480"]]
+    },
+    {
+      short: "Haar 偵測", lane: 1, scope: "main thread · FaceDetector::detect",
+      lead: "Haar 只看明暗：像「眼睛那一條比臉頰暗」這種圖樣。它用一個小框掃過整張圖、換好幾種大小，每個位置都要通過二十幾關檢查，通過的地方就是一張臉。它只知道「這裡有臉」，不知道是誰。",
+      bullets: ["先轉灰階、縮到 320 寬、做直方圖等化：Haar 只看亮度，縮小可以快很多。", "detectMultiScale（OpenCV 提供）掃描，得到一堆框。", "把座標放大回原圖，再用 merge_overlaps 把一大一小重疊的框合併。", "背景偶爾會被誤判（例如螢幕邊框），下一步的追蹤會把它擋掉。"],
+      code: [["main.cpp", "run_live", "第 1 步：呼叫 detector.detect"], ["face_detector.cpp", "FaceDetector::detect", "縮小、等化、detectMultiScale、座標換回原圖"], ["face_detector.cpp", "merge_overlaps", "重疊太多的框只留最大的"]],
+      params: [["detect_width", "320"], ["scale_factor", "1.15"], ["min_neighbors", "4"], ["min_face", "30"], ["overlap_merge", "0.6"]]
+    },
+    {
+      short: "追蹤", lane: 1, scope: "main thread · Tracker::update",
+      lead: "偵測是每一幀各自獨立的，直接畫會跳、會閃。追蹤把「這一幀的框」對到「上一幀的哪張臉」，同一張臉一直用同一個編號，框也會平滑移動。",
+      bullets: ["重疊夠多（IoU ≥ 0.3）或中心距離小於 1 個臉寬，就算同一張臉；距離最近的先配。", "小幅變動用平滑：新位置 = 0.4 × 偵測 + 0.6 × 舊位置；移動超過 0.25 個臉寬就直接跳過去。", "沒偵測到時保留舊框 0.4 秒（用秒數，不受 FPS 影響），超過才刪。", "至少偵測到 2 次才畫出來，一閃即逝的誤判就不會出現。", "兩個框重疊太多就合併成一個。"],
+      code: [["tracker.cpp", "Tracker::update", "配對、平滑、保留時間、建立新軌跡"], ["tracker.cpp", "merge_overlapping_tracks", "合併重疊的軌跡"], ["main.cpp", "run_live", "tracker.update ( faces, now )"]],
+      params: [["iou_match", "0.3"], ["center_match", "1.0"], ["ema_alpha", "0.4"], ["snap_distance", "0.25"], ["track_timeout", "0.4 s"], ["min_hits", "2"]]
+    },
+    {
+      short: "送去辨識", lane: 1, scope: "main thread · Recognizer::push",
+      lead: "辨識一張臉要上百毫秒，如果在主迴圈做，畫面會卡住。所以主迴圈只負責把臉附近的區域複製下來，丟進工作佇列，馬上繼續處理下一幀。",
+      bullets: ["只有「這一幀有偵測到」而且「沒有工作在排隊」的臉才送。", "新出現的臉立刻送；之後每張臉每 1 秒重新送一次，轉頭、移動後結果會更新。", "複製臉框放大 1.6 倍的區域，背景執行緒就不會碰到主迴圈正在畫的那張圖。", "佇列最多 4 個：板子沒有 swap，佇列一定要有上限。"],
+      code: [["main.cpp", "run_live", "第 3 步：決定哪些臉要送、複製區域"], ["recognizer.cpp", "Recognizer::push", "放進佇列；滿了就丟棄"]],
+      params: [["recog_interval", "1.0 s"], ["MAX_JOBS", "4"]]
+    },
+    {
+      short: "對齊＋MobileFaceNet", lane: 2, scope: "recognition thread · Recognizer::loop",
+      lead: "背景執行緒拿到一張臉，先轉正，再交給 MobileFaceNet 變成 128 個數字。同一個人的數字會很接近，不同人會差很遠。最後跟兩位組員的範本比相似度。",
+      bullets: ["對齊：在臉框上半部用 Haar 眼睛偵測找雙眼，旋轉、縮放，讓兩眼落在 112×112 的固定位置；找不到眼睛就用臉框比例估計。", "MobileFaceNet（用 ncnn 跑）輸出 128 維特徵，再做 L2 正規化（長度變成 1）。", "跟每位組員的範本算 cosine 相似度。", "最高分 ≥ 0.45，而且贏第二名 0.08 以上 → 學號；否則 unknown。"],
+      code: [["recognizer.cpp", "Recognizer::loop", "從佇列取出工作，依序做下面三件事"], ["face_aligner.cpp", "FaceAligner::align", "找眼睛、相似變換、裁成 112×112"], ["face_embedder.cpp", "FaceEmbedder::embed", "ncnn 推論、L2 正規化"], ["gallery.cpp", "Gallery::match", "相似度、門檻、判斷學號或 unknown"]],
+      params: [["sim_threshold", "0.45"], ["sim_margin", "0.08"], ["input_rgb", "1"], ["ncnn_threads", "2"]]
+    },
+    {
+      short: "投票", lane: 1, scope: "main thread · Tracker::add_vote",
+      lead: "單次辨識偶爾會錯（剛好轉頭、模糊）。每張臉保留最近 7 次結果，用多數決決定畫面上顯示的標籤，偶爾一次錯也不會讓學號跳來跳去。",
+      bullets: ["主迴圈每一幀用 take_results 收回已經辨識完的結果。", "第一次結果直接顯示，讓標籤盡快出現。", "之後新標籤要至少 3 票、而且比目前顯示的票數多，才會換。", "同一個學號只能出現在一個框上；兩個框都被認成同一人時，保留平均相似度高的，另一個改成 unknown。"],
+      code: [["recognizer.cpp", "Recognizer::take_results", "取走所有完成的結果"], ["tracker.cpp", "Tracker::add_vote", "加入投票、多數決、遲滯"], ["tracker.cpp", "Tracker::resolve_duplicates", "同一學號只留一個"]],
+      params: [["vote_window", "7"], ["vote_min", "3"]]
+    },
+    {
+      short: "畫框＋輸出", lane: 1, scope: "main thread · Framebuffer::show",
+      lead: "最後在畫面上畫框和文字：綠色是組員（學號），紅色是 unknown，黃色「...」是還在辨識。然後寫進 HDMI 的 framebuffer。",
+      bullets: ["draw_tracks 只畫 hits ≥ 2 的框，顏色依標籤決定。", "Framebuffer::show 等比例縮放、置中，畫面不變形。", "依螢幕格式自動轉色：LCD 是 16 bpp，HDMI 是 32 bpp。", "轉色的結果直接寫進螢幕記憶體，不經過暫存。", "display_fit: 0 不放大，每幀只寫約 1.2 MB，延遲最小。"],
+      code: [["main.cpp", "draw_tracks", "畫框、填標籤底色、寫文字"], ["framebuffer.cpp", "Framebuffer::show", "縮放、置中、建立指向螢幕記憶體的 Mat"], ["framebuffer.cpp", "Framebuffer::convert", "BGR → BGR565 或 BGRA"]],
+      params: [["fb_device", "/dev/fb2"], ["display_fit", "0"]]
+    }
+  ];
+
+  // ---------- real source excerpts (text lives in <script type="text/plain" id="src-..."> blocks) ----------
+  var SNIPS = [
+    [
+      { id: "camera-loop", notes: {
+        50: "讀一張畫面；讀失敗就再試一次，不會讓程式停下來。",
+        55: "cv::swap 只交換新舊畫面的指標，不複製像素，所以很快。latest 永遠是最新的那一張。",
+        56: "記下這張畫面被拍到的時間，之後用來算「拍到 → 出現在螢幕上」的延遲。",
+        57: "畫面編號加 1，主迴圈靠它判斷是不是新畫面。",
+        59: "叫醒正在等新畫面的主迴圈。",
+        66: "主迴圈在這裡等，直到出現「比上次拿到的更新」的畫面，最多等 2 秒。",
+        69: "複製一份給主迴圈；之後攝影機執行緒再改 latest，也不會影響主迴圈手上這張。" } }
+    ],
+    [
+      { id: "detect", notes: {
+        45: "算縮放比例：640 寬縮到 320 寬，就是 0.5。",
+        48: "轉灰階：Haar 只看亮度，不需要顏色。",
+        49: "縮小，像素數變成約 1/4，偵測快很多。",
+        52: "直方圖等化：太暗或太亮的畫面，對比會被拉回正常。",
+        56: "OpenCV 的 Haar 偵測本體。scale_factor 是每次放大搜尋框的倍數；min_neighbors 是至少幾個重疊命中才算一張臉；最後一個參數是最小臉的大小。",
+        63: "座標除以 scale，從 320×240 換回 640×480 的原圖座標。",
+        68: "把一大一小重疊的框合併，交給下面的 merge_overlaps。" } },
+      { id: "merge", notes: {
+        25: "把框依面積由大到小排序，大的先被保留。",
+        33: "兩個框重疊的面積（Rect 的 & 是取交集）。",
+        34: "比較小那個框的面積。",
+        35: "重疊超過小框面積的 60%（overlap_merge），就當作同一張臉的重複框，丟掉。" } }
+    ],
+    [
+      { id: "track", notes: {
+        68: "兩個框大小差超過 2 倍就不配對，避免臉的框被背景的小雜點搶走。",
+        69: "中心距離，以「幾個臉寬」為單位，跟臉離鏡頭多遠無關。",
+        70: "重疊夠多（IoU ≥ 0.3）或中心夠近（≤ 1 個臉寬），就是候選配對。",
+        74: "依距離由近到遠排序，最近的先配。",
+        79: "已經配過的軌跡或偵測框就跳過，保證一對一。",
+        87: "移動超過 snap_distance（0.25 個臉寬）就 alpha = 1，直接跳到新位置；否則用 ema_alpha（0.4）平滑。",
+        88: "平滑公式：新位置 = alpha × 偵測到的 + (1 − alpha) × 舊位置。",
+        92: "hits 加 1：累計被看到幾次，≥ min_hits（2）才會畫出來。",
+        94: "記下最後一次看到它的時間。",
+        102: "超過 track_timeout（0.4 秒）沒被看到就刪掉。用秒數而不是幀數，FPS 低時也不會殘留舊框。",
+        110: "沒配到的偵測框是新出現的臉，給它一個新編號。",
+        118: "最後把重疊太多的軌跡合併成一個。" } }
+    ],
+    [
+      { id: "queue", notes: {
+        310: "還沒畫出來的、已經在排隊的、這一幀沒被偵測到的，都不送。",
+        311: "距離上次送出不到 recog_interval（1 秒）也不送。",
+        315: "四周各多 30%，區域總共是臉框的 1.6 倍，對齊時才有空間轉正。",
+        317: "& 取交集：把超出畫面的部分裁掉。",
+        322: "clone 複製一份：背景執行緒拿到的是獨立的影像，主迴圈之後在原圖上畫框也不會影響它。",
+        323: "臉框改成相對於 region 左上角的座標。",
+        324: "送進佇列；成功了才標記 pending，避免同一張臉重複排隊。" } },
+      { id: "push", notes: {
+        34: "上鎖：主執行緒和辨識執行緒不會同時改到佇列。",
+        35: "佇列已經有 4 個（MAX_JOBS）就放棄這次。板子沒有 swap，佇列一定要有上限。",
+        38: "叫醒辨識執行緒。" } }
+    ],
+    [
+      { id: "recog-loop", notes: {
+        57: "沒有工作時就睡著等，不佔 CPU。",
+        59: "取出最前面的工作。",
+        64: "對齊：把臉轉正、裁成 112×112。",
+        65: "MobileFaceNet：把臉變成 128 個數字。",
+        66: "跟組員範本比對，決定學號或 unknown。",
+        71: "index 小於 0 代表沒通過門檻 → unknown。",
+        76: "結果放進 results，主迴圈下一幀會來拿。" } },
+      { id: "align", notes: {
+        74: "先在臉框上半部用 Haar 眼睛偵測找雙眼。",
+        77: "找不到就用臉框的固定比例估計：左眼在寬 30%、高 38% 的位置。",
+        83: "原圖中「左眼 → 右眼」的向量。",
+        84: "112×112 樣板中「左眼 → 右眼」的向量。",
+        85: "縮放倍數 = 兩個向量長度的比。",
+        86: "旋轉角度 = 兩個向量的夾角。",
+        91: "平移量：讓轉完之後的左眼剛好落在樣板左眼。",
+        96: "OpenCV 照矩陣 M 把臉轉正、裁成 112×112。" } },
+      { id: "embed", notes: {
+        31: "OpenCV 的影像是 BGR，InsightFace 的模型吃 RGB，所以要換。",
+        32: "把 OpenCV 影像轉成 ncnn 的格式。",
+        35: "把影像放進模型的輸入層（\"data\"）。",
+        37: "跑神經網路，從輸出層（\"fc1\"）取出 128 個數字。",
+        44: "L2 正規化：讓向量長度變成 1。之後兩個向量的內積就是 cosine 相似度。" } },
+      { id: "match", notes: {
+        85: "跟每位組員的平均範本算相似度。",
+        86: "比目前最高還高：原本的最高變成第二高，這個變成最高。",
+        92: "沒比最高高，但比第二高高：更新第二高。",
+        97: "判斷規則：最高分 ≥ 門檻（0.45），而且贏第二名 ≥ margin（0.08），才算認出這個人。" } }
+    ],
+    [
+      { id: "collect", notes: {
+        296: "一次取走所有已經辨識完的結果。",
+        299: "每個結果加進對應那張臉的投票。",
+        303: "檢查有沒有兩個框顯示同一個學號。" } },
+      { id: "vote", notes: {
+        151: "辨識完時那張臉已經離開畫面，就把結果丟掉。",
+        152: "不再 pending，之後可以再送去辨識。",
+        154: "只保留最近 vote_window（7）次的結果。",
+        157: "第一次的結果直接顯示，讓標籤盡快出現。",
+        165: "數每個標籤各有幾票。",
+        169: "找出票數最多的標籤。",
+        175: "要換掉目前的標籤：新標籤至少 vote_min（3）票，而且比目前顯示的多。" } },
+      { id: "dedup", notes: {
+        183: "unknown 和還在辨識的框不用檢查。",
+        187: "兩個框是同一個學號：平均相似度高的保留。",
+        188: "另一個改成 unknown。" } }
+    ],
+    [
+      { id: "draw", notes: {
+        223: "被看到不到 min_hits 次的框不畫。",
+        225: "決定要寫的文字：還在辨識是「...」，陌生人是 unknown，組員是學號。",
+        229: "顏色：綠 = 組員，紅 = unknown，黃 = 辨識中。",
+        231: "畫框。",
+        235: "先畫一塊填滿的底色，文字才看得清楚。",
+        236: "寫上學號或 unknown。" } },
+      { id: "show", notes: {
+        85: "依 bpp 決定每個像素幾個 byte：16 bpp 是 2 byte，32 bpp 是 4 byte。",
+        97: "等比例縮放：取寬、高比例比較小的那個，圖一定放得進螢幕，也不會變形。",
+        98: "display_fit: 0 時只縮小不放大。",
+        105: "放大用最快的 INTER_NEAREST，縮小用 INTER_AREA。",
+        117: "置中：左右、上下各留一半的黑邊。",
+        119: "直接在螢幕記憶體上建一個 Mat。line_length 是螢幕每一列有幾個 byte。",
+        120: "轉色，結果直接寫進螢幕。" } },
+      { id: "convert", notes: {
+        71: "LCD（16 bpp）：BGR → BGR565，每個像素 2 byte。",
+        73: "HDMI（32 bpp）：BGR → BGRA，每個像素 4 byte。" } }
+    ]
+  ];
+
+  var codeview = document.getElementById("codeview");
+  function renderCode(i) {
+    var html = "";
+    SNIPS[i].forEach(function (sn) {
+      var el = document.getElementById("src-" + sn.id);
+      if (!el) return;
+      var start = parseInt(el.getAttribute("data-start"), 10);
+      var lines = el.textContent.replace(/^\n/, "").replace(/\n\s*$/, "").split("\n");
+      var keys = Object.keys(sn.notes).map(Number).sort(function (a, b) { return a - b; });
+      var mark = {};
+      keys.forEach(function (k, idx) { mark[k] = idx + 1; });
+      var src = lines.map(function (line, j) {
+        var no = start + j, m = mark[no];
+        return '<span class="ln' + (m ? " hl" : "") + '"><span class="no">' + no + '</span>' + esc(line) + (m ? '<span class="mk">' + m + '</span>' : "") + '</span>';
+      }).join("");
+      var ex = keys.map(function (k) {
+        return '<li><span class="mk">' + mark[k] + '</span><div><span class="lno">第 ' + k + ' 行　</span>' + esc(sn.notes[k]) + '</div></li>';
+      }).join("");
+      html += '<article class="snip"><div class="snip-head"><span><b>' + esc(el.getAttribute("data-file")) + '</b>　' + esc(el.getAttribute("data-fn")) + '</span><span class="muted">第 ' + start + '–' + (start + lines.length - 1) + ' 行</span></div>' +
+              '<div class="snip-body"><div class="src"><pre>' + src + '</pre></div><div class="explain"><ol>' + ex + '</ol></div></div></article>';
+    });
+    codeview.innerHTML = html;
+    document.getElementById("codeTitle").textContent = "步驟 " + (i + 1) + "「" + STEPS[i].short + "」的實際程式碼";
+  }
+
+  var scene = document.getElementById("scene");
+  var lanes = document.getElementById("lanes");
+  var notes = document.getElementById("notes");
+  var stepsNav = document.getElementById("steps");
+  var scopeTitle = document.getElementById("scopeTitle");
+  var current = 0, timer = null;
+
+  STEPS.forEach(function (st, i) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.innerHTML = '<span class="n">' + (i + 1) + '</span>' + st.short;
+    b.addEventListener("click", function () { stop(); go(i); });
+    stepsNav.appendChild(b);
+  });
+
+  function esc(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+
+  function renderNotes(i) {
+    var st = STEPS[i];
+    var h = '<div class="eyebrow">步驟 ' + (i + 1) + ' / ' + STEPS.length + '</div>';
+    h += '<h2>' + esc(st.short) + '</h2>';
+    h += '<p class="lead">' + esc(st.lead) + '</p>';
+    h += '<div class="block"><div class="label">發生了什麼</div><ul>' + st.bullets.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join("") + '</ul></div>';
+    h += '<div class="block"><div class="label">對應程式碼</div><div class="codelist">' + st.code.map(function (c) {
+      return '<div class="codeitem"><div class="where">' + esc(c[0]) + ' — <b>' + esc(c[1]) + '</b></div><div class="what">' + esc(c[2]) + '</div></div>';
+    }).join("") + '</div></div>';
+    h += '<div class="block"><div class="label">相關參數（config.yml）</div><div class="chips">' + st.params.map(function (p) {
+      return '<span class="chip">' + esc(p[0]) + ' <i>' + esc(p[1]) + '</i></span>';
+    }).join("") + '</div></div>';
+    if (i === 6) h += '<div class="controls"><button type="button" id="fitToggle">切換 display_fit（目前 ' + fitMode + '）</button></div>';
+    notes.innerHTML = h;
+    var ft = document.getElementById("fitToggle");
+    if (ft) ft.addEventListener("click", function () { fitMode = fitMode ? 0 : 1; scene.innerHTML = scenes[6](); ft.textContent = "切換 display_fit（目前 " + fitMode + "）"; });
+  }
+
+  function renderLanes(i) {
+    var names = ["攝影機執行緒", "主執行緒", "辨識執行緒"];
+    var ys = [28, 78, 128];
+    var nodes = [[0, 190], [1, 250], [1, 320], [1, 390], [2, 460], [1, 530], [1, 600]];
+    var s = '<defs><marker id="larr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="' + v("--muted") + '"/></marker></defs>';
+    s += '<rect x="0" y="0" width="640" height="172" fill="' + v("--bg") + '"/>';
+    for (var l = 0; l < 3; l++) {
+      s += '<line x1="120" y1="' + ys[l] + '" x2="632" y2="' + ys[l] + '" stroke="' + v("--line") + '" stroke-width="2"/>';
+      s += '<text x="10" y="' + (ys[l] + 5) + '" font-size="13" fill="' + (STEPS[i].lane === l ? v("--accent") : v("--muted")) + '" font-weight="' + (STEPS[i].lane === l ? 700 : 400) + '" font-family="Noto Sans TC, sans-serif">' + names[l] + '</text>';
+    }
+    function link(a, b) {
+      var A = nodes[a], B = nodes[b];
+      s += '<line x1="' + (A[1] + (A[0] === B[0] ? 14 : 6)) + '" y1="' + (ys[A[0]] + (A[0] < B[0] ? 10 : A[0] > B[0] ? -10 : 0)) + '" x2="' + (B[1] - (A[0] === B[0] ? 15 : 8)) + '" y2="' + (ys[B[0]] + (A[0] < B[0] ? -12 : A[0] > B[0] ? 12 : 0)) + '" stroke="' + v("--muted") + '" stroke-width="1.5" marker-end="url(#larr)"/>';
+    }
+    link(0, 1); link(1, 2); link(2, 3); link(3, 4); link(4, 5); link(5, 6);
+    for (var n = 0; n < nodes.length; n++) {
+      var on = n === i, done = n < i;
+      s += '<circle cx="' + nodes[n][1] + '" cy="' + ys[nodes[n][0]] + '" r="' + (on ? 14 : 11) + '" fill="' + (on ? v("--accent") : done ? v("--accent-soft") : v("--surface")) + '" stroke="' + (on || done ? v("--accent") : v("--line")) + '" stroke-width="2"/>';
+      s += '<text x="' + nodes[n][1] + '" y="' + (ys[nodes[n][0]] + 4.5) + '" text-anchor="middle" font-size="12" font-weight="600" fill="' + (on ? "#ffffff" : v("--ink")) + '" font-family="JetBrains Mono, monospace">' + (n + 1) + '</text>';
+    }
+    s += '<text x="632" y="164" text-anchor="end" font-size="11" fill="' + v("--muted") + '" font-family="Noto Sans TC, sans-serif">主迴圈每一幀重複 2→3→4→6→7；辨識執行緒同時在背景跑 5</text>';
+    lanes.innerHTML = s;
+  }
+
+  function go(i) {
+    current = (i + STEPS.length) % STEPS.length;
+    scene.innerHTML = scenes[current]();
+    scopeTitle.textContent = STEPS[current].scope;
+    var bs = stepsNav.querySelectorAll("button");
+    for (var k = 0; k < bs.length; k++) { if (k === current) bs[k].setAttribute("aria-current", "step"); else bs[k].removeAttribute("aria-current"); }
+    renderNotes(current);
+    renderLanes(current);
+    renderCode(current);
+  }
+
+  var playBtn = document.getElementById("play");
+  function stop() { if (timer) { clearInterval(timer); timer = null; } playBtn.textContent = "播放"; }
+  playBtn.addEventListener("click", function () {
+    if (timer) { stop(); return; }
+    playBtn.textContent = "暫停";
+    timer = setInterval(function () { go(current + 1); }, 5200);
+  });
+  document.getElementById("prev").addEventListener("click", function () { stop(); go(current - 1); });
+  document.getElementById("next").addEventListener("click", function () { stop(); go(current + 1); });
+  document.addEventListener("keydown", function (e) {
+    if (e.target && e.target.tagName === "INPUT") return;
+    if (e.key === "ArrowRight") { stop(); go(current + 1); }
+    if (e.key === "ArrowLeft") { stop(); go(current - 1); }
+  });
+
+  go(0);
+
+  // ---------- threshold bench ----------
+  var ROWS = [
+    ["314831017，正面", 0.93, 0.06],
+    ["314581047，頭稍微轉", 0.71, 0.10],
+    ["314831017，模糊、側光", 0.48, 0.12],
+    ["陌生人（戴眼鏡）", 0.21, 0.15],
+    ["陌生人，跟兩位都有點像", 0.38, 0.33],
+    ["看不清楚的臉，兩人分數接近", 0.52, 0.47]
+  ];
+  var thr = document.getElementById("thr"), mar = document.getElementById("mar");
+  var thrOut = document.getElementById("thrOut"), marOut = document.getElementById("marOut");
+  var tbody = document.getElementById("benchRows");
+  function renderBench() {
+    var T = parseFloat(thr.value), M = parseFloat(mar.value);
+    thrOut.textContent = T.toFixed(2); marOut.textContent = M.toFixed(2);
+    tbody.innerHTML = ROWS.map(function (r) {
+      var best = Math.max(r[1], r[2]), second = Math.min(r[1], r[2]);
+      var who = r[1] >= r[2] ? "314831017" : "314581047";
+      var okT = best >= T, okM = best - second >= M, ok = okT && okM;
+      var why = ok ? "最高 " + best.toFixed(2) + " ≥ " + T.toFixed(2) + "，贏第二名 " + (best - second).toFixed(2)
+                   : (!okT ? "最高只有 " + best.toFixed(2) + "，低於門檻" : "跟第二名只差 " + (best - second).toFixed(2) + "，分不出是誰");
+      return '<tr><td>' + esc(r[0]) + '</td><td class="num">' + r[1].toFixed(2) + '</td><td class="num">' + r[2].toFixed(2) + '</td><td><span class="pill ' + (ok ? "member" : "unknown") + '">' + (ok ? who : "unknown") + '</span><div class="reason">' + why + '</div></td></tr>';
+    }).join("");
+  }
+  thr.addEventListener("input", renderBench);
+  mar.addEventListener("input", renderBench);
+  document.getElementById("resetThr").addEventListener("click", function () { thr.value = 0.45; mar.value = 0.08; renderBench(); });
+  renderBench();
+})();
+</script>

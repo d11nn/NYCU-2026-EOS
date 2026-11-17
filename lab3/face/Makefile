@@ -5,11 +5,9 @@
 # OPENCV_DIR must contain include/opencv2/ and lib/libopencv_world.so (the Lab 2 build).
 # NCNN_DIR is where scripts/build_ncnn.sh installs ncnn.
 
-# Makefile
 # 名字 := 值 代表用的時候寫成 $(名字)會自己把它換成值
 # X ?= 值 代表沒人設定過才設定
 #
-# make 內建的 CXX 是 g++（x86），沒有在命令列指定時改用交叉編譯器
 #
 # origin 代表 CXX 這個變數的 value 從哪裡來的
 # default 內建 CXX = g++, 所以意思是如果 CXX 還是 g++ 就改成交叉編譯器
@@ -22,12 +20,18 @@ endif
 OPENCV_DIR ?= $(HOME)/opencv-3.4.7/install
 NCNN_DIR   ?= $(CURDIR)/third_party/ncnn/build-armhf/install
 
+# 最終產出的執行檔叫 face3
 TARGET   := face3
+# wildcard 是 make 的內建函式，找出符合樣式的所有檔案。
 SRCS     := $(wildcard src/*.cpp)
+
+# src/camera.cpp   →  % 是 camera  →  build/camera.o
 OBJS     := $(SRCS:src/%.cpp=build/%.o)
+
 
 CXXFLAGS := -O2 -std=c++11 -Wall -march=armv7-a -mfpu=neon -mfloat-abi=hard -fopenmp \
             -I$(OPENCV_DIR)/include -I$(NCNN_DIR)/include/ncnn
+
 # libopencv_world 編譯時開了 Qt5 的 highgui，連結時會去找 libQt5*.so。
 # 我們沒用到 Qt 的視窗功能，那些符號留到板子上執行時再由板子的 Qt5 函式庫解析
 LDFLAGS  := -L$(OPENCV_DIR)/lib -L$(NCNN_DIR)/lib -fopenmp -Wl,--allow-shlib-undefined

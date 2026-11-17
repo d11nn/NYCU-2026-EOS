@@ -4,6 +4,7 @@
 安全帽部分另有一份更細的逐行導讀：`helmet/CODE_GUIDE.md`。
 先看「整體架構」抓住資料怎麼流，再照「逐檔導讀」對著原始碼讀；每個段落都標了行號。
 兩個專案各自的 README（`face/README.md`、`helmet/README.md`）有參數調整表和實測時間，這裡不重複。
+3.2 從資料、訓練、評估到搬上板子是怎麼做的，寫在 `helmet/README.md` 的 A 部分。
 
 ## 0. 資料夾
 
@@ -233,7 +234,7 @@ Haar 每幀各自獨立偵測，框會抖、偶爾漏一幀、同一張臉有時
      記下縮放比 `r` 和補邊 `px, py`。
   2. 第 38-42 行：`from_pixels(PIXEL_BGR2RGB)`、`substract_mean_normalize(mean=0, norm=1/255)` → 0~1。
   3. 第 44-48 行：`input("in0")` / `extract("out0")`，`pass_count++`。
-  4. 第 50-69 行解碼輸出：`out` 是 5 x N，每一欄一個候選框 `(cx, cy, w, h, score)`（這個匯出版本已內建 NMS，所以沒有 class 維度）。
+  4. 第 50-69 行解碼輸出：`out` 是 5 x N，每一欄一個候選框 `(cx, cy, w, h, score)`（模型只有一個類別，所以沒有 class 維度；這個匯出版本不含 NMS，重複框由 `merge_boxes` 去掉）。
      分數低於 `conf_threshold` 丟掉；座標「先扣補邊，再除以 r」換回原圖（第 63-66 行）。
 - `find_helmets(bgr)`（第 73-116 行）＝ 整張 + 切塊 + 合併：
   1. 第 77 行：整張圖跑一次（近的、大的人）。

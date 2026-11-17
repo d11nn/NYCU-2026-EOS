@@ -15,13 +15,16 @@ lab3/
 ├── mock.jpg            final demo 前公布的練習圖（6000x4000 拼貼）
 ├── lab3-report.md      3.1 人臉辨識的流程報告
 ├── lab3-1.pdf          3.1 報告的 PDF 版
+├── lab3-2-report.md    3.2 安全帽偵測的報告
+├── lab3-report.pdf     完整報告（3.1 + 3.2）的 PDF 版
 ├── assets/             報告用的圖
 ├── report/             3.1 的補充文件
 │   ├── face_recognition_selection.md   技術選型報告（為什麼選 Haar + MobileFaceNet + ncnn）
 │   ├── lab31_explained.html            3.1 流程圖解
 │   ├── face_pipeline.html              人臉辨識 pipeline 示意
 │   ├── lab31_code_reader.html          原始碼對照講義需求的導讀頁
-│   └── build_code_reader.py、code_reader_template.html   產生上面那頁（python3 lab3/report/build_code_reader.py）
+│   ├── build_code_reader.py、code_reader_template.html   產生上面那頁（python3 lab3/report/build_code_reader.py）
+│   └── build_report.py                 把兩份報告的 .md 合成 lab3-report.pdf（python3 lab3/report/build_report.py）
 ├── face/               3.1 即時人臉辨識（執行檔 face3）
 │   ├── src/            11 個 .cpp + 對應 .hpp（見第 2 節）
 │   ├── scripts/        build_ncnn.sh（交叉編譯 ncnn）、get_models.sh（下載模型）

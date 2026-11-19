@@ -7,6 +7,7 @@
 | [`lab1/`](lab1/) | 交叉編譯 hello world |
 | [`lab2/`](lab2/) | 直接寫 framebuffer：顯示圖片、攝影機即時畫面、跑馬燈 |
 | [`lab3/`](lab3/) | 3.1 即時人臉辨識（`face/`）、3.2 安全帽偵測（`helmet/`） |
+| [`lab4/`](lab4/) | 交叉編譯 madplay 與 alsa-utils，在板子上播放 MP3、錄音並回放（報告在 `report/`） |
 | `tools/` | 序列埠傳檔工具 lrzsz 的原始碼壓縮檔 |
 
 各 lab 資料夾裡有講義 PDF、原始碼、編好的 ARM 執行檔和 README。

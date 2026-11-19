@@ -1,0 +1,41 @@
+digraph helmet {
+  graph [rankdir=LR, fontname="Noto Sans CJK TC", fontsize=17, labelloc=t, labeljust=l, pad=0.25, nodesep=0.28, ranksep=0.38, bgcolor="white",
+         label="helmet 安全帽偵測流程（Lab 3.2）", newrank=true];
+  node  [shape=box, style="rounded,filled", fontname="Noto Sans CJK TC", fontsize=13, margin="0.13,0.08", penwidth=1.4, fillcolor="#f4f6f8", color="#8a94a3"];
+  edge  [fontname="Noto Sans CJK TC", fontsize=13, color="#5b6573", arrowsize=0.8, penwidth=1.2];
+
+  subgraph cluster_board {
+    label="板子 E9V3（helmet 程式，C++）"; labeljust=l; fontsize=14; style="rounded,filled"; color="#4c8bf5"; fillcolor="#f0f5ff"; penwidth=1.4; margin=14;
+    hdmi  [label="Framebuffer\n/dev/fb2\n→ HDMI", fillcolor="#eef1f4"];
+    save  [label="畫框、存檔\nlab3_final_\n<組別>.jpg", color="#2f9e6e", fillcolor="#e9f7f1"];
+    merge [label="merge_boxes\nNMS\n一人一框", color="#2f9e6e", fillcolor="#e9f7f1"];
+    tiles [label="detect：切 2×2 塊\n各跑一次\n補遠處的小帽子", color="#2f9e6e", fillcolor="#e9f7f1"];
+    whole [label="detect：整張圖\n縮到 640 → ncnn\n→ 解出框", color="#2f9e6e", fillcolor="#e9f7f1"];
+    photo [label="照片\n最大 6000×4000", fillcolor="#eef1f4"];
+    model [label="helmet.ncnn.param\nhelmet.ncnn.bin", color="#7b61c9", fillcolor="#f1edfb"];
+    hdmi -> save -> merge [dir=back];
+    merge -> whole [dir=back];
+    merge -> tiles [dir=back];
+    whole -> photo [dir=back];
+    tiles -> photo [dir=back];
+    whole -> model [dir=back, style=dotted, color="#7b61c9"];
+    tiles -> model [dir=back, style=dotted, color="#7b61c9"];
+  }
+
+  subgraph cluster_train {
+    label="訓練機（有 GPU）"; labeljust=l; fontsize=14; style="rounded,filled"; color="#e2a03f"; fillcolor="#fff8ec"; penwidth=1.4; margin=14;
+    src    [label="公開資料集\nOpen Images、\nSHWD、HWD2024…", fillcolor="#eef1f4"];
+    data   [label="VLM 標註 + 檢查\n訓練集 58,264 張\n一半沒有安全帽", color="#2f9e6e", fillcolor="#e9f7f1"];
+    pre    [label="預訓練權重\nyolo26s.pt", color="#7b61c9", fillcolor="#f1edfb"];
+    train  [label="訓練 YOLO26s\n輸入 640\n60 epoch", color="#2f9e6e", fillcolor="#e9f7f1"];
+    eval   [label="照講義規則\n算 F1\n挑門檻 0.50", color="#2f9e6e", fillcolor="#e9f7f1"];
+    export [label="匯出\nncnn 模型", color="#7b61c9", fillcolor="#f1edfb"];
+    src -> data -> train -> eval -> export;
+    pre -> train;
+    eval -> data [style=dashed, color="#d9534f", fontcolor="#d9534f", label="看錯誤、補資料\n共三輪", constraint=false];
+  }
+
+  export -> model [xlabel="傳到板子  ", color="#7b61c9", fontcolor="#7b61c9", style=dashed, constraint=false];
+  { rank=same; hdmi; src; }
+  { rank=same; export; model; photo; }
+}

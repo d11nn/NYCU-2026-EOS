@@ -45,7 +45,27 @@ aplay 只能播放 WAV，不能解碼 MP3；madplay 負責解碼 MP3。因此本
 madplay -o wav:- music.mp3 | aplay
 ```
 
-套件之間的相依關係決定了編譯順序：
+## 三、編譯方式與重點
+
+本實驗的核心不是寫程式，而是把現成的原始碼正確地交叉編譯成板子能執行的版本。本節說明我們用什麼方式編譯、為什麼一定要照順序編譯，以及編譯時要注意的地方；每一步的實際指令列在第四節。
+
+### 3.1 我們怎麼編譯：交叉編譯 + autotools
+
+開發機是 x86_64 的 Ubuntu，板子是 ARM Cortex-A9。在 Ubuntu 上直接用 `gcc` 編出來的是 x86 機器碼，放到板子上會出現 `Exec format error`，無法執行。因此我們用交叉編譯器 `arm-linux-gnueabihf-gcc`：它在 x86 上執行，產生的卻是 ARM 機器碼，並且連結 toolchain 內附的 ARM 版 glibc。
+
+六個套件中，除了 zlib 以外都使用 GNU autotools，編譯固定分成三個步驟：
+
+| 步驟 | 做什麼 | 本實驗用到的關鍵參數 |
+| --- | --- | --- |
+| `./configure` | 偵測編譯環境、檢查相依的標頭檔與函式庫是否存在，產生 `Makefile` 與 `config.h` | `--host=arm-linux-gnueabihf`：程式要在 ARM Linux 上執行，因此改用 `arm-linux-gnueabihf-` 開頭的工具；`--prefix`：安裝位置 |
+| `make` | 依照 `Makefile` 編譯、連結 | 無 |
+| `make install` | 把執行檔、函式庫、標頭檔、設定檔複製到 `--prefix` 底下的 `bin/`、`lib/`、`include/`、`share/` | 無 |
+
+`--build` 是「編譯時所在的機器」，`--host` 是「程式要在哪台機器執行」，兩者不同就是交叉編譯。configure 會自動偵測 `--build`，所以每次都會出現 `If you wanted to set the --build type, don't use --host` 這個警告，可以忽略。zlib 的 configure 是手寫的，不認得 `--host`，只能用 `CC=`、`AR=`、`RANLIB=` 直接指定交叉編譯工具。
+
+### 3.2 為什麼要有編譯順序
+
+函式庫之間有相依關係。後面的套件在 configure 時會檢查前面套件的標頭檔與函式庫是否存在，在 make 時要連結它們的 `.so`。如果前面的套件還沒裝好，configure 會直接報錯停止，例如找不到 `mad.h` 或 `-lmad`。
 
 ```
 zlib --> libid3tag --+
@@ -55,19 +75,43 @@ libmad --------------+
 alsa-lib --> alsa-utils (aplay / arecord / amixer)
 ```
 
-## 三、建置流程
+| 順序 | 套件 | 需要先有 | 原因 |
+| --- | --- | --- | --- |
+| 1 | zlib | 無 | 最底層的壓縮函式庫 |
+| 2 | libid3tag | zlib | ID3v2 標籤裡的 frame 可能經過壓縮，需要 zlib 解壓 |
+| 3 | libmad | 無 | 純粹的解碼函式庫，只要排在 madplay 之前即可 |
+| 4 | madplay | libmad、libid3tag | 用 libmad 解碼、用 libid3tag 讀標籤，兩者缺一 configure 都會失敗 |
+| 5 | alsa-lib | 無 | ALSA 的使用者空間函式庫 |
+| 6 | alsa-utils | alsa-lib | aplay、arecord、amixer 都是透過 alsa-lib 的 API 操作音效卡 |
+
+madplay 和 alsa-utils 這兩條線彼此獨立。madplay 只負責把 MP3 解成 WAV 串流寫到 stdout，不直接呼叫 ALSA，所以兩條線誰先編都可以，但每條線內部的順序不能顛倒。
+
+相依關係在執行時同樣存在：板子上必須同時有這些 `.so` 檔，程式才能啟動。所以部署時要把整個 `lib/` 一起帶上去，並用 `LD_LIBRARY_PATH` 告訴動態連結器去哪裡找。
+
+### 3.3 編譯要注意的重點
+
+1. **每個套件都必須用交叉編譯器。** 只要有一個套件不小心用了主機的 `gcc`，連結時就會出現架構不符的錯誤，或是放到板子上無法執行。編譯完用 `file` 檢查，結果要是 `ARM, EABI5`，不能是 `x86-64`。
+2. **統一安裝到自己的 prefix，不要用 sudo 裝進系統目錄。** 這些是 ARM 程式，裝進 Ubuntu 的 `/usr` 會混進主機的系統。全部集中在 `$HOME/lab4/install`，後面的套件容易找到前面的套件，打包到板子上也只要帶這一個資料夾。
+3. **讓後面的套件找得到前面的套件。** 用 `CPPFLAGS=-I$PREFIX/include`、`LDFLAGS=-L$PREFIX/lib` 指定搜尋路徑，alsa-utils 另外用 `--with-alsa-prefix`、`--with-alsa-inc-prefix` 指定 alsa-lib 的位置。否則 configure 可能找不到，或是誤用 Ubuntu 主機上 x86 版的函式庫。
+4. **prefix 會被寫死進程式。** alsa-lib 會把設定檔路徑 `$PREFIX/share/alsa/alsa.conf` 寫進函式庫。板子上的放置路徑必須和編譯時的 prefix 一致，否則要用 symlink 接過去（見問題 6）。
+5. **舊套件和新編譯器可能不相容。** 這些套件大多是 2004 年左右的版本，而 toolchain 是 2016 年的 gcc 5.3。本實驗遇到三個相關問題：gcc 已移除的 `-fforce-mem` 參數、預設 Thumb-2 模式不支援 libmad 的 ARM 組合語言（見問題 2）、alsa-lib 猜錯交叉編譯器名稱（見問題 3）。
+6. **失敗後重新 configure 前先 `make distclean`。** 清掉上一次留下的設定與 `.o` 檔，避免新舊參數混在一起。
+7. **環境變數只在目前的 shell 有效。** 不管是 Ubuntu 上的 `PREFIX`、`CPPFLAGS`，還是板子上的 `LD_LIBRARY_PATH`，開新的 terminal 都要重新 `export`（見問題 5）。
+8. **板子上只需要執行時期的檔案。** 板子只需要 `bin/`、`lib/`、`share/alsa/`；`include/` 和 `.a` 靜態函式庫只有編譯時才會用到。
+
+## 四、建置步驟
 
 所有編譯都在 Ubuntu 虛擬機上進行。原因是交叉編譯器安裝在 Ubuntu 上，而且這些 2000 年代的 autotools 套件在 Linux 上編譯比較順利。
 
-### 3.1 把檔案從 macOS 傳到 Ubuntu
+### 4.1 把檔案從 macOS 傳到 Ubuntu
 
 ```
 scp -O -r ~/nycu/eos/NYCU-2026-EOS/lab4 ubuntu@192.168.56.110:~/
 ```
 
-`-O` 的原因請見第四節的問題 1。
+`-O` 的原因請見第五節的問題 1。
 
-### 3.2 設定環境變數
+### 4.2 設定環境變數
 
 ```
 export PREFIX=$HOME/lab4/install HOST=arm-linux-gnueabihf \
@@ -78,7 +122,7 @@ export PREFIX=$HOME/lab4/install HOST=arm-linux-gnueabihf \
 - `HOST`：告訴 configure 目標平台是 ARM Linux，這是開啟交叉編譯的開關。
 - `CPPFLAGS` / `LDFLAGS`：讓後面的套件可以找到前面已安裝的標頭檔與函式庫。
 
-### 3.3 解壓縮
+### 4.3 解壓縮
 
 ```
 cd ~/lab4/lab4_package
@@ -86,7 +130,7 @@ for f in *.tar.gz; do tar xzf "$f"; done
 for f in *.tar.bz2; do tar xjf "$f"; done
 ```
 
-### 3.4 zlib
+### 4.4 zlib
 
 ```
 cd zlib-1.2.3
@@ -97,7 +141,7 @@ make && make install
 
 zlib 的 configure 是手寫的，不支援 `--host`，所以要直接用 `CC`、`AR`、`RANLIB` 指定交叉編譯工具。
 
-### 3.5 libid3tag
+### 4.5 libid3tag
 
 ```
 cd ../libid3tag-0.15.1b
@@ -105,7 +149,7 @@ cd ../libid3tag-0.15.1b
 make && make install
 ```
 
-### 3.6 libmad
+### 4.6 libmad
 
 ```
 cd ../libmad-0.15.1b
@@ -115,9 +159,9 @@ make && make install
 ```
 
 - `-fforce-mem` 是舊版 gcc 的參數，gcc 4.3 以後已經移除，必須從 configure 中刪掉。
-- `-marm` 的原因請見第四節的問題 2。
+- `-marm` 的原因請見第五節的問題 2。
 
-### 3.7 madplay
+### 4.7 madplay
 
 ```
 cd ../madplay-0.15.2b
@@ -127,7 +171,7 @@ make && make install
 
 `--disable-nls` 會關閉多國語言翻譯，避免需要額外的 gettext 函式庫。
 
-### 3.8 alsa-lib
+### 4.8 alsa-lib
 
 ```
 cd ../alsa-lib-1.0.26
@@ -136,9 +180,9 @@ make && make install
 ```
 
 - 不需要 Python 綁定，所以用 `--disable-python` 關掉。
-- `CC=` 的原因請見第四節的問題 3。
+- `CC=` 的原因請見第五節的問題 3。
 
-### 3.9 alsa-utils
+### 4.9 alsa-utils
 
 ```
 cd ../alsa-utils-1.0.26
@@ -152,9 +196,9 @@ make install udevrulesdir=$PREFIX/lib/udev/rules.d
 - `--with-alsa-*`：指定使用剛剛編好的 ARM 版 alsa-lib，而不是 Ubuntu 系統上的 x86 版。
 - `--disable-alsamixer`：alsamixer 需要 ncurses，而且 `amixer` 已經足夠使用。
 - `--disable-xmlto`：不產生 man page 文件。
-- `udevrulesdir=` 的原因請見第四節的問題 4。
+- `udevrulesdir=` 的原因請見第五節的問題 4。
 
-### 3.10 驗證與打包
+### 4.10 驗證與打包
 
 ```
 file $PREFIX/bin/madplay $PREFIX/bin/aplay $PREFIX/lib/libmad.so.0 $PREFIX/lib/libasound.so.2
@@ -163,7 +207,7 @@ cd ~/lab4 && tar czf lab4_board.tar.gz -C install bin lib share
 
 `file` 指令的結果應該顯示 `ELF 32-bit LSB ... ARM, EABI5`，表示這些檔案確實是 ARM 版本。打包時只需要 `bin`（執行檔）、`lib`（共享函式庫）、`share/alsa`（alsa-lib 設定檔）三個目錄，`include` 只有編譯時才用得到。
 
-## 四、遇到的問題與解決方法
+## 五、遇到的問題與解決方法
 
 ### 問題 1：scp 上傳失敗（path canonicalization failed）
 
@@ -240,7 +284,7 @@ mkdir -p /home/ubuntu/lab4
 ln -s /home/embedsky/lab4/install /home/ubuntu/lab4/install
 ```
 
-## 五、上板執行
+## 六、上板執行
 
 ### 5.1 部署
 
@@ -289,7 +333,7 @@ aplay test.wav
 
 <!-- 待補：錄音與播放的截圖 -->
 
-## 六、MP3 播放的訊號處理流程
+## 七、MP3 播放的訊號處理流程
 
 MP3 是經過心理聲學模型去除人耳聽不到的成分，再以 Huffman 編碼壓縮的頻域資料。播放 MP3 就是把這個過程反過來，還原成時域的 PCM 樣本，再交給硬體轉成類比訊號。完整流程如下：
 
@@ -339,7 +383,7 @@ music.mp3
 
 錄音則是反方向：麥克風 → codec 的 ADC → I2S / DMA → ALSA 驅動 → alsa-lib → arecord 加上 WAV header → `.wav` 檔。
 
-## 七、參考資料
+## 八、參考資料
 
 1. Underbit Technologies, *MAD: MPEG Audio Decoder*. https://www.underbit.com/products/mad/
 2. ALSA Project, *Advanced Linux Sound Architecture*. https://www.alsa-project.org/

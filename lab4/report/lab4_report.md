@@ -1,8 +1,11 @@
 # Lab 4：在 E9V3 上建置 MP3 播放器
 
 - 組別：30
-- 組員：ep（314581047）
+- 組員：314581047、314831017
 
+## MindMap
+
+![](./Lab4_mindmap.png)
 ## 一、實驗目標與環境
 
 本實驗只使用課程提供的六個原始碼套件（不使用 apt-get），在 Ubuntu 上交叉編譯出 madplay 與 aplay，再到 E9V3 開發板上播放 `music.mp3`，並用麥克風錄製 `.wav` 檔後回放。
@@ -46,8 +49,6 @@ madplay -o wav:- music.mp3 | aplay
 ```
 
 ## 三、編譯方式與重點
-
-本實驗的核心不是寫程式，而是把現成的原始碼正確地交叉編譯成板子能執行的版本。本節說明我們用什麼方式編譯、為什麼一定要照順序編譯，以及編譯時要注意的地方；每一步的實際指令列在第四節。
 
 ### 3.1 我們怎麼編譯：交叉編譯 + autotools
 
@@ -101,17 +102,9 @@ madplay 和 alsa-utils 這兩條線彼此獨立。madplay 只負責把 MP3 解�
 
 ## 四、建置步驟
 
-所有編譯都在 Ubuntu 虛擬機上進行。原因是交叉編譯器安裝在 Ubuntu 上，而且這些 2000 年代的 autotools 套件在 Linux 上編譯比較順利。
+編譯都在 Ubuntu 虛擬機上進行。原因是交叉編譯器安裝在 Ubuntu 上，而且這些 2000 年代的 autotools 套件在 Linux 上編譯比較順利。
 
-### 4.1 把檔案從 macOS 傳到 Ubuntu
-
-```
-scp -O -r ~/nycu/eos/NYCU-2026-EOS/lab4 ubuntu@192.168.56.110:~/
-```
-
-`-O` 的原因請見第五節的問題 1。
-
-### 4.2 設定環境變數
+### 4.1 設定環境變數
 
 ```
 export PREFIX=$HOME/lab4/install HOST=arm-linux-gnueabihf \
@@ -122,7 +115,7 @@ export PREFIX=$HOME/lab4/install HOST=arm-linux-gnueabihf \
 - `HOST`：告訴 configure 目標平台是 ARM Linux，這是開啟交叉編譯的開關。
 - `CPPFLAGS` / `LDFLAGS`：讓後面的套件可以找到前面已安裝的標頭檔與函式庫。
 
-### 4.3 解壓縮
+### 4.2 解壓縮
 
 ```
 cd ~/lab4/lab4_package
@@ -130,7 +123,7 @@ for f in *.tar.gz; do tar xzf "$f"; done
 for f in *.tar.bz2; do tar xjf "$f"; done
 ```
 
-### 4.4 zlib
+### 4.3 zlib
 
 ```
 cd zlib-1.2.3
@@ -141,7 +134,7 @@ make && make install
 
 zlib 的 configure 是手寫的，不支援 `--host`，所以要直接用 `CC`、`AR`、`RANLIB` 指定交叉編譯工具。
 
-### 4.5 libid3tag
+### 4.4 libid3tag
 
 ```
 cd ../libid3tag-0.15.1b
@@ -149,7 +142,7 @@ cd ../libid3tag-0.15.1b
 make && make install
 ```
 
-### 4.6 libmad
+### 4.5 libmad
 
 ```
 cd ../libmad-0.15.1b
@@ -159,9 +152,9 @@ make && make install
 ```
 
 - `-fforce-mem` 是舊版 gcc 的參數，gcc 4.3 以後已經移除，必須從 configure 中刪掉。
-- `-marm` 的原因請見第五節的問題 2。
+- `-marm` 的原因請見第五節的問題 1。
 
-### 4.7 madplay
+### 4.6 madplay
 
 ```
 cd ../madplay-0.15.2b
@@ -171,7 +164,7 @@ make && make install
 
 `--disable-nls` 會關閉多國語言翻譯，避免需要額外的 gettext 函式庫。
 
-### 4.8 alsa-lib
+### 4.7 alsa-lib
 
 ```
 cd ../alsa-lib-1.0.26
@@ -180,9 +173,9 @@ make && make install
 ```
 
 - 不需要 Python 綁定，所以用 `--disable-python` 關掉。
-- `CC=` 的原因請見第五節的問題 3。
+- `CC=` 的原因請見第五節的問題 2。
 
-### 4.9 alsa-utils
+### 4.8 alsa-utils
 
 ```
 cd ../alsa-utils-1.0.26
@@ -196,9 +189,9 @@ make install udevrulesdir=$PREFIX/lib/udev/rules.d
 - `--with-alsa-*`：指定使用剛剛編好的 ARM 版 alsa-lib，而不是 Ubuntu 系統上的 x86 版。
 - `--disable-alsamixer`：alsamixer 需要 ncurses，而且 `amixer` 已經足夠使用。
 - `--disable-xmlto`：不產生 man page 文件。
-- `udevrulesdir=` 的原因請見第五節的問題 4。
+- `udevrulesdir=` 的原因請見第五節的問題 3。
 
-### 4.10 驗證與打包
+### 4.9 驗證與打包
 
 ```
 file $PREFIX/bin/madplay $PREFIX/bin/aplay $PREFIX/lib/libmad.so.0 $PREFIX/lib/libasound.so.2
@@ -209,20 +202,7 @@ cd ~/lab4 && tar czf lab4_board.tar.gz -C install bin lib share
 
 ## 五、遇到的問題與解決方法
 
-### 問題 1：scp 上傳失敗（path canonicalization failed）
-
-**錯誤訊息：**
-
-```
-scp: realpath ./lab4: No such file
-scp: upload "./lab4": path canonicalization failed
-```
-
-**原因：** macOS 上的 OpenSSH 是 9.0 以後的版本，`scp` 預設改用 SFTP 協定傳輸。上傳目錄之前，它會先向遠端查詢目標路徑的完整路徑；但 Ubuntu 14.04 的舊版 sshd 無法對尚未存在的路徑做 realpath，所以上傳失敗。
-
-**解法：** 加上 `-O`，改回使用舊版的 SCP 協定。
-
-### 問題 2：libmad 編譯時組譯器報錯（Thumb mode）
+### 問題 1：libmad 編譯時組譯器報錯（Thumb mode）
 
 **錯誤訊息：**
 
@@ -235,7 +215,7 @@ make[2]: *** [synth.lo] Error 1
 
 **解法：** 先執行 `make distclean`，再用 `CFLAGS="-O2 -marm"` 重新 configure，強制 libmad 以 ARM 模式編譯。這樣可以保留組合語言的加速效果。Cortex-A9 同時支援 ARM 與 Thumb 指令集，兩種模式的程式碼可以混用。另一個替代方案是 `--enable-fpm=default`，改用純 C 的定點數運算。
 
-### 問題 3：alsa-lib configure 失敗（C compiler cannot create executables）
+### 問題 2：alsa-lib configure 失敗（C compiler cannot create executables）
 
 **錯誤訊息：**
 
@@ -248,7 +228,7 @@ configure: error: C compiler cannot create executables
 
 **解法：** 用 `CC=arm-linux-gnueabihf-gcc` 明確指定編譯器。alsa-utils 也加上同樣的參數，避免發生相同的問題。
 
-### 問題 4：alsa-utils 執行 make install 時 Permission denied
+### 問題 3：alsa-utils 執行 make install 時 Permission denied
 
 **錯誤訊息：**
 
@@ -261,7 +241,7 @@ configure: error: C compiler cannot create executables
 
 **解法：** 不使用 sudo，因為那樣會把 ARM 版本的設定檔寫進 Ubuntu 主機。改成在 make 時覆蓋 Makefile 變數：`make install udevrulesdir=$PREFIX/lib/udev/rules.d`。這樣不需要重新 configure 或重新編譯。
 
-### 問題 5：板子上執行 madplay 找不到 libmad.so.0
+### 問題 4：板子上執行 madplay 找不到 libmad.so.0
 
 **錯誤訊息：**
 
@@ -273,7 +253,7 @@ madplay: error while loading shared libraries: libmad.so.0: cannot open shared o
 
 **解法：** 改用 `export LD_LIBRARY_PATH=/home/embedsky/lab4/install/lib`。
 
-### 問題 6：部署路徑與編譯時的 prefix 不同
+### 問題 5：部署路徑與編譯時的 prefix 不同
 
 **原因：** 編譯時的 `--prefix` 是 Ubuntu 上的 `/home/ubuntu/lab4/install`，但板子上的使用者目錄是 `/home/embedsky`，檔案實際放在 `/home/embedsky/lab4/install`。共享函式庫可以用 `LD_LIBRARY_PATH` 指定位置，但 alsa-lib 的設定檔路徑在編譯時已經寫死成 `/home/ubuntu/lab4/install/share/alsa/alsa.conf`。放在別的地方，aplay 會找不到 ALSA 的設定。
 
@@ -286,27 +266,7 @@ ln -s /home/embedsky/lab4/install /home/ubuntu/lab4/install
 
 ## 六、上板執行
 
-### 5.1 部署
-
-<!-- 待補：說明用什麼方式把檔案傳到板子上（SD 卡 / USB） -->
-
-把 `lab4_board.tar.gz` 和 `music.mp3` 傳到板子的 `/home/embedsky/lab4`，然後執行：
-
-```
-cd /home/embedsky/lab4
-mkdir -p install
-tar xzf lab4_board.tar.gz -C install
-mkdir -p /home/ubuntu/lab4
-ln -s /home/embedsky/lab4/install /home/ubuntu/lab4/install
-export PATH=/home/embedsky/lab4/install/bin:$PATH
-export LD_LIBRARY_PATH=/home/embedsky/lab4/install/lib
-```
-
-- `PATH`：讓 shell 找得到 madplay、aplay 等執行檔。
-- `LD_LIBRARY_PATH`：讓執行檔找得到 `libmad.so`、`libasound.so` 等共享函式庫。必須用 `export`，原因請見問題 5。
-- symlink：讓 alsa-lib 可以在編譯時寫死的路徑找到 `alsa.conf`，原因請見問題 6。
-
-### 5.2 播放 MP3（Demo 2.1）
+### 5.1 播放 MP3（Demo 2.1）
 
 ```
 madplay --version
@@ -318,9 +278,7 @@ madplay -o wav:- music.mp3 | aplay
 - `aplay -l`：確認系統有偵測到音效卡。
 - 最後一行用 madplay 把 MP3 解碼成 WAV 串流，再透過 pipe 交給 aplay 播放。實測可以從耳機孔正常聽到音樂。
 
-<!-- 待補：播放成功的截圖 -->
-
-### 5.3 錄音與回放（Demo 2.2）
+### 5.2 錄音與回放（Demo 2.2）
 
 ```
 arecord -l
@@ -330,8 +288,6 @@ aplay test.wav
 ```
 
 `-f cd` 表示 16-bit、44100 Hz、雙聲道；`-d 5` 表示錄 5 秒。錄好的 WAV 不需要解碼，可以直接用 aplay 播放。如果錄到的是一片無聲，要用 `amixer` 開啟麥克風的 Capture 開關。
-
-<!-- 待補：錄音與播放的截圖 -->
 
 ## 七、MP3 播放的訊號處理流程
 

@@ -14,3 +14,8 @@ models/
 # model weights and deploy bundles that contain them (same rule as models/)
 *.ncnn.bin
 /lab3/face/*.tar.gz
+
+# lab4 report: local PDF build helpers and generated files
+/lab4/report/build_pdf.sh
+/lab4/report/md2html.py
+/lab4/report/*.html
